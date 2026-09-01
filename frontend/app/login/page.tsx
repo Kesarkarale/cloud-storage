@@ -1,23 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
-  ArrowLeft,
   ArrowRight,
   CheckCircle2,
   Cloud,
   Eye,
   EyeOff,
-  File,
   FolderOpen,
   Lock,
+  Menu,
+  Share2,
   ShieldCheck,
-   Zap,
-  Sparkles,
-  Upload,
+  Users,
+  X,
+  Zap,
 } from "lucide-react";
+import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,37 +27,53 @@ export default function LoginPage() {
 
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
 
-  // =========================
-  // CHECK OAUTH ERRORS
-  // =========================
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // =========================================================
+  // OAUTH ERROR CHECK
+  // =========================================================
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(
+      window.location.search
+    );
+
     const oauthError = params.get("error");
 
     if (oauthError === "oauth_failed") {
-      setError("Google login failed. Please try again.");
+      setError(
+        "Google login failed. Please try again."
+      );
     }
 
     if (oauthError === "google_email_missing") {
-      setError("Could not get your Google email.");
+      setError(
+        "Could not get your Google email."
+      );
     }
   }, []);
 
-  // =========================
+  // =========================================================
   // NORMAL LOGIN
-  // =========================
+  // =========================================================
 
-  async function handleLogin(e: FormEvent<HTMLFormElement>) {
+  async function handleLogin(
+    e: FormEvent<HTMLFormElement>
+  ) {
     e.preventDefault();
 
     setError("");
 
-    if (!email.trim() || !password) {
-      setError("Please enter your email and password.");
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail || !password) {
+      setError(
+        "Please enter your email and password."
+      );
       return;
     }
 
@@ -76,7 +92,7 @@ export default function LoginPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            email: email.trim(),
+            email: cleanEmail,
             password,
           }),
         }
@@ -87,24 +103,32 @@ export default function LoginPage() {
 
       let data: unknown;
 
-      if (contentType?.includes("application/json")) {
+      if (
+        contentType?.includes("application/json")
+      ) {
         data = await response.json();
       } else {
         data = await response.text();
       }
 
       if (!response.ok) {
-        let message = "Invalid email or password.";
+        let message =
+          "Invalid email or password.";
 
         if (
           typeof data === "object" &&
           data !== null &&
           "message" in data
         ) {
-          message = String(
-            (data as { message?: unknown }).message ||
-              message
-          );
+          const objectData = data as {
+            message?: unknown;
+          };
+
+          if (objectData.message) {
+            message = String(
+              objectData.message
+            );
+          }
         } else if (
           typeof data === "string" &&
           data.trim()
@@ -114,6 +138,10 @@ export default function LoginPage() {
 
         throw new Error(message);
       }
+
+      // =====================================================
+      // GET JWT TOKEN
+      // =====================================================
 
       let token: string | null = null;
 
@@ -134,8 +162,12 @@ export default function LoginPage() {
           null;
       }
 
-      if (!token && typeof data === "string") {
-        token = data;
+      if (
+        !token &&
+        typeof data === "string" &&
+        data.trim()
+      ) {
+        token = data.trim();
       }
 
       if (!token) {
@@ -144,7 +176,24 @@ export default function LoginPage() {
         );
       }
 
-      localStorage.setItem("token", token);
+      // =====================================================
+      // SAVE TOKEN
+      // =====================================================
+
+      localStorage.setItem(
+        "token",
+        token
+      );
+
+      // Optional compatibility key
+      localStorage.setItem(
+        "accessToken",
+        token
+      );
+
+      // =====================================================
+      // REDIRECT
+      // =====================================================
 
       router.replace("/dashboard");
     } catch (err) {
@@ -158,9 +207,9 @@ export default function LoginPage() {
     }
   }
 
-  // =========================
+  // =========================================================
   // GOOGLE LOGIN
-  // =========================
+  // =========================================================
 
   function handleGoogleLogin() {
     setError("");
@@ -175,36 +224,111 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#060912] text-white">
-      <div className="relative grid min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
+    <main className="min-h-screen overflow-hidden bg-[#060912] text-white">
 
-        {/* =====================================================
-            BACKGROUND GLOW
-        ====================================================== */}
+      {/* =====================================================
+          BACKGROUND
+      ====================================================== */}
 
-        <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-          <div className="absolute left-[-200px] top-[10%] h-[500px] w-[500px] rounded-full bg-blue-600/10 blur-[140px]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
 
-          <div className="absolute bottom-[-200px] right-[-150px] h-[500px] w-[500px] rounded-full bg-violet-600/10 blur-[140px]" />
+        <div className="absolute left-[-180px] top-[-150px] h-[500px] w-[500px] rounded-full bg-blue-600/10 blur-[140px]" />
+
+        <div className="absolute bottom-[-180px] right-[-150px] h-[500px] w-[500px] rounded-full bg-violet-600/10 blur-[140px]" />
+
+        <div className="absolute left-1/2 top-1/2 h-[450px] w-[450px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500/[0.04] blur-[120px]" />
+      </div>
+
+      {/* =====================================================
+          MOBILE TOP BAR
+      ====================================================== */}
+
+      <header className="border-b border-white/[0.07] bg-[#060912]/80 backdrop-blur-xl lg:hidden">
+
+        <div className="flex h-[72px] items-center justify-between px-5">
+
+          <Link
+            href="/"
+            className="flex items-center gap-3"
+          >
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/20">
+              <Cloud className="h-5 w-5" />
+            </div>
+
+            <span className="text-lg font-bold">
+              Cloud<span className="text-blue-400">
+                Vault
+              </span>
+            </span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={() =>
+              setMenuOpen(!menuOpen)
+            }
+            className="rounded-lg p-2 text-slate-400 hover:bg-white/5 hover:text-white"
+            aria-label="Open menu"
+          >
+            {menuOpen ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <Menu className="h-5 w-5" />
+            )}
+          </button>
         </div>
 
-        {/* =====================================================
-            LEFT BRAND SECTION
-        ====================================================== */}
+        {menuOpen && (
+          <div className="border-t border-white/[0.07] px-5 py-4">
 
-        <section className="relative hidden overflow-hidden border-r border-white/[0.07] bg-[#080d18] lg:flex lg:flex-col lg:justify-between">
+            <Link
+              href="/"
+              onClick={() =>
+                setMenuOpen(false)
+              }
+              className="block rounded-lg px-3 py-3 text-sm text-slate-400 hover:bg-white/5 hover:text-white"
+            >
+              Back to Home
+            </Link>
 
-          {/* Glow */}
-          <div className="absolute left-1/2 top-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-600/10 blur-[140px]" />
+            <Link
+              href="/register"
+              onClick={() =>
+                setMenuOpen(false)
+              }
+              className="mt-2 block rounded-lg bg-blue-600 px-3 py-3 text-center text-sm font-semibold"
+            >
+              Create Account
+            </Link>
+          </div>
+        )}
+      </header>
+
+      {/* =====================================================
+          MAIN
+      ====================================================== */}
+
+      <div className="grid min-h-[calc(100vh-72px)] lg:min-h-screen lg:grid-cols-[1.05fr_0.95fr]">
+
+        {/* ===================================================
+            LEFT BRAND PANEL
+        ==================================================== */}
+
+        <section className="relative hidden overflow-hidden border-r border-white/[0.07] bg-[#080d18] lg:flex lg:flex-col">
+
+          {/* Decorative glow */}
+
+          <div className="absolute left-1/2 top-1/2 h-[650px] w-[650px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-600/[0.08] blur-[150px]" />
 
           <div className="relative z-10 flex h-full flex-col justify-between p-10 xl:p-14">
 
             {/* Logo */}
+
             <Link
               href="/"
               className="group flex w-fit items-center gap-3"
             >
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/25 transition group-hover:scale-105">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/25 transition duration-300 group-hover:scale-105">
                 <Cloud className="h-5 w-5" />
               </div>
 
@@ -215,13 +339,15 @@ export default function LoginPage() {
               </span>
             </Link>
 
-            {/* Center Content */}
-            <div className="relative max-w-xl">
+            {/* Main content */}
+
+            <div className="max-w-xl">
 
               <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-blue-400/15 bg-blue-500/[0.07] px-4 py-2 text-xs font-medium text-blue-300">
-                <Sparkles className="h-3.5 w-3.5" />
 
-                Secure cloud storage
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+
+                Secure Cloud Storage
               </div>
 
               <h2 className="text-5xl font-bold leading-[1.08] tracking-[-0.04em] xl:text-6xl">
@@ -238,41 +364,51 @@ export default function LoginPage() {
               </h2>
 
               <p className="mt-6 max-w-lg text-base leading-7 text-slate-400 xl:text-lg">
-                Store, organize and access your important
-                files securely from anywhere with CloudVault.
+                Store, manage and access your
+                important files securely from
+                anywhere with CloudVault.
               </p>
 
               {/* Benefits */}
-              <div className="mt-9 space-y-4">
+
+              <div className="mt-10 space-y-5">
 
                 <Benefit
                   icon={<ShieldCheck />}
                   title="Secure storage"
-                  text="Your files stay protected."
+                  text="Keep your important files protected."
                 />
 
                 <Benefit
-                  icon={<ZapIcon />}
+                  icon={<FolderOpen />}
+                  title="Simple file management"
+                  text="Organize and manage files with ease."
+                />
+
+                <Benefit
+                  icon={<Zap />}
                   title="Fast access"
                   text="Access your files whenever you need."
                 />
 
                 <Benefit
-                  icon={<ShareIcon />}
+                  icon={<Users />}
                   title="Easy sharing"
-                  text="Share files when collaboration matters."
+                  text="Share files whenever collaboration is needed."
                 />
-
               </div>
 
-              {/* Mini Dashboard */}
-              <div className="relative mt-12 hidden xl:block">
-                <MiniDashboard />
+              {/* Dashboard Preview */}
+
+              <div className="mt-12">
+                <DashboardPreview />
               </div>
             </div>
 
             {/* Footer */}
+
             <div className="flex items-center justify-between text-xs text-slate-600">
+
               <span>
                 © {new Date().getFullYear()} CloudVault
               </span>
@@ -284,42 +420,30 @@ export default function LoginPage() {
           </div>
         </section>
 
-        {/* =====================================================
-            RIGHT LOGIN SECTION
-        ====================================================== */}
+        {/* ===================================================
+            RIGHT LOGIN PANEL
+        ==================================================== */}
 
-        <section className="flex min-h-screen items-center justify-center px-5 py-10 sm:px-8 lg:px-12">
+        <section className="flex items-center justify-center px-5 py-12 sm:px-8 lg:px-12">
 
           <div className="w-full max-w-[430px]">
 
-            {/* Mobile Back */}
+            {/* Back link */}
+
             <Link
               href="/"
-              className="mb-8 inline-flex items-center gap-2 text-sm text-slate-500 transition hover:text-white lg:hidden"
+              className="mb-8 hidden items-center gap-2 text-sm text-slate-600 transition hover:text-slate-300 sm:inline-flex"
             >
-              <ArrowLeft className="h-4 w-4" />
-
+              <span>←</span>
               Back to CloudVault
             </Link>
 
-            {/* Mobile Logo */}
-            <div className="mb-9 flex items-center gap-3 lg:hidden">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 shadow-lg shadow-blue-600/20">
-                <Cloud className="h-5 w-5" />
-              </div>
-
-              <span className="text-xl font-bold">
-                Cloud<span className="text-blue-400">
-                  Vault
-                </span>
-              </span>
-            </div>
-
             {/* Header */}
+
             <div className="mb-8">
 
-              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-400/10 bg-blue-500/[0.08] text-blue-400">
-                <Lock className="h-5 w-5" />
+              <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-400/10 bg-blue-500/[0.08]">
+                <Lock className="h-5 w-5 text-blue-400" />
               </div>
 
               <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
@@ -327,21 +451,26 @@ export default function LoginPage() {
               </h1>
 
               <p className="mt-3 text-sm leading-6 text-slate-500 sm:text-base">
-                Sign in to access your CloudVault
-                account and files.
+                Sign in to continue to your
+                CloudVault account.
               </p>
             </div>
 
             {/* Error */}
+
             {error && (
               <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/[0.07] px-4 py-3.5 text-sm text-red-300">
-                <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-red-400" />
+
+                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-400" />
 
                 <span>{error}</span>
               </div>
             )}
 
-            {/* Login Card */}
+            {/* =================================================
+                LOGIN CARD
+            ================================================== */}
+
             <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5 shadow-2xl shadow-black/20 sm:p-6">
 
               <form
@@ -350,7 +479,9 @@ export default function LoginPage() {
               >
 
                 {/* Email */}
+
                 <div>
+
                   <label
                     htmlFor="email"
                     className="mb-2.5 block text-sm font-medium text-slate-200"
@@ -373,6 +504,7 @@ export default function LoginPage() {
                 </div>
 
                 {/* Password */}
+
                 <div>
 
                   <div className="mb-2.5 flex items-center justify-between">
@@ -388,7 +520,7 @@ export default function LoginPage() {
                       type="button"
                       onClick={() =>
                         setError(
-                          "Password reset will be available soon."
+                          "Password reset is not configured yet."
                         )
                       }
                       className="text-xs font-medium text-blue-400 transition hover:text-blue-300"
@@ -398,6 +530,7 @@ export default function LoginPage() {
                   </div>
 
                   <div className="relative">
+
                     <input
                       id="password"
                       type={
@@ -418,9 +551,11 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() =>
-                        setShowPassword(!showPassword)
+                        setShowPassword(
+                          !showPassword
+                        )
                       }
-                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-600 transition hover:bg-white/[0.05] hover:text-slate-300"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 text-slate-600 transition hover:bg-white/5 hover:text-slate-300"
                       aria-label={
                         showPassword
                           ? "Hide password"
@@ -436,7 +571,8 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                {/* Login */}
+                {/* Sign in */}
+
                 <button
                   type="submit"
                   disabled={loading}
@@ -451,17 +587,19 @@ export default function LoginPage() {
                     <>
                       Sign in
 
-                      <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                      <ArrowRight className="h-4 w-4 transition duration-300 group-hover:translate-x-1" />
                     </>
                   )}
                 </button>
               </form>
 
               {/* Divider */}
-              <div className="my-6 flex items-center gap-4">
+
+              <div className="my-7 flex items-center gap-4">
+
                 <div className="h-px flex-1 bg-white/[0.07]" />
 
-                <span className="text-[10px] font-medium tracking-widest text-slate-600">
+                <span className="text-[10px] font-medium tracking-widest text-slate-700">
                   OR
                 </span>
 
@@ -469,20 +607,24 @@ export default function LoginPage() {
               </div>
 
               {/* Google */}
+
               <button
                 type="button"
                 onClick={handleGoogleLogin}
                 disabled={googleLoading}
-                className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-white/[0.09] bg-[#080d18] text-sm font-medium text-slate-200 transition hover:border-white/[0.15] hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-white/[0.09] bg-[#080d18] text-sm font-medium text-slate-200 transition hover:border-white/[0.14] hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-60"
               >
+
                 {googleLoading ? (
                   <>
                     <Spinner />
+
                     Connecting to Google...
                   </>
                 ) : (
                   <>
                     <GoogleIcon />
+
                     Continue with Google
                   </>
                 )}
@@ -490,7 +632,9 @@ export default function LoginPage() {
             </div>
 
             {/* Register */}
+
             <p className="mt-7 text-center text-sm text-slate-500">
+
               Don't have an account?{" "}
 
               <Link
@@ -501,11 +645,13 @@ export default function LoginPage() {
               </Link>
             </p>
 
-            {/* Security note */}
-            <div className="mt-7 flex items-center justify-center gap-2 text-[11px] text-slate-700">
+            {/* Security */}
+
+            <div className="mt-6 flex items-center justify-center gap-2 text-[11px] text-slate-700">
+
               <ShieldCheck className="h-3.5 w-3.5" />
 
-              Your connection is protected
+              Your connection is securely protected
             </div>
           </div>
         </section>
@@ -515,7 +661,7 @@ export default function LoginPage() {
 }
 
 /* =========================================================
-   BENEFIT
+   BENEFIT COMPONENT
 ========================================================= */
 
 function Benefit({
@@ -529,8 +675,11 @@ function Benefit({
 }) {
   return (
     <div className="flex items-center gap-3">
+
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.07] bg-white/[0.03] text-blue-400">
-        {icon}
+        <span className="[&>svg]:h-4 [&>svg]:w-4">
+          {icon}
+        </span>
       </div>
 
       <div>
@@ -547,95 +696,150 @@ function Benefit({
 }
 
 /* =========================================================
-   MINI DASHBOARD
+   DASHBOARD PREVIEW
 ========================================================= */
 
-function MiniDashboard() {
+function DashboardPreview() {
   return (
     <div className="relative max-w-[500px]">
-      <div className="absolute -inset-5 rounded-3xl bg-blue-600/10 blur-3xl" />
 
-      <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b1120]/90 shadow-2xl">
+      <div className="absolute -inset-6 rounded-3xl bg-blue-600/[0.08] blur-3xl" />
 
-        {/* Header */}
+      <div className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b1120]/95 shadow-2xl">
+
+        {/* Browser bar */}
+
         <div className="flex items-center gap-1.5 border-b border-white/[0.07] px-4 py-3">
-          <span className="h-2 w-2 rounded-full bg-red-400/70" />
-          <span className="h-2 w-2 rounded-full bg-yellow-400/70" />
-          <span className="h-2 w-2 rounded-full bg-green-400/70" />
 
-          <div className="ml-3 h-5 flex-1 rounded-md bg-white/[0.03]" />
+          <span className="h-2 w-2 rounded-full bg-red-400/60" />
+          <span className="h-2 w-2 rounded-full bg-yellow-400/60" />
+          <span className="h-2 w-2 rounded-full bg-green-400/60" />
+
+          <div className="ml-4 h-5 flex-1 rounded-md bg-white/[0.03]" />
         </div>
 
-        <div className="p-4">
+        <div className="grid grid-cols-[100px_1fr] gap-3 p-3">
 
-          {/* Dashboard title */}
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[8px] text-slate-600">
-                Welcome back
-              </p>
+          {/* Sidebar */}
 
-              <p className="mt-1 text-xs font-semibold">
-                My Files
-              </p>
-            </div>
+          <div className="rounded-xl bg-white/[0.025] p-2.5">
 
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-500/10 text-[8px] font-bold text-blue-300">
-              K
-            </div>
-          </div>
+            <div className="mb-5 flex items-center gap-1.5">
 
-          {/* Cards */}
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            <DashboardBox
-              icon={<FolderOpen />}
-              value="128"
-              label="Files"
-            />
+              <Cloud className="h-3.5 w-3.5 text-blue-400" />
 
-            <DashboardBox
-              icon={<Share2 />}
-              value="24"
-              label="Shared"
-            />
-
-            <DashboardBox
-              icon={<HardDrive />}
-              value="6.8 GB"
-              label="Storage"
-            />
-          </div>
-
-          {/* Files */}
-          <div className="mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-
-            <div className="mb-3 flex justify-between">
-              <span className="text-[8px] font-semibold">
-                Recent Files
-              </span>
-
-              <span className="text-[7px] text-blue-400">
-                View all
+              <span className="text-[8px] font-bold">
+                CloudVault
               </span>
             </div>
 
-            <SmallFile
-              icon={<FileText />}
-              name="Project Report.pdf"
-              size="2.4 MB"
-            />
+            <div className="space-y-1.5">
 
-            <SmallFile
-              icon={<File />}
-              name="Presentation.pptx"
-              size="5.8 MB"
-            />
+              <MiniNav
+                active
+                icon={<FolderOpen />}
+                text="Dashboard"
+              />
 
-            <SmallFile
-              icon={<FileImage />}
-              name="Images.zip"
-              size="18.5 MB"
-            />
+              <MiniNav
+                icon={<FolderOpen />}
+                text="My Files"
+              />
+
+              <MiniNav
+                icon={<Share2 />}
+                text="Shared"
+              />
+
+              <MiniNav
+                icon={<Zap />}
+                text="Recent"
+              />
+            </div>
+          </div>
+
+          {/* Main */}
+
+          <div>
+
+            <div className="mb-3 flex items-center justify-between">
+
+              <div>
+                <p className="text-[7px] text-slate-600">
+                  Welcome back
+                </p>
+
+                <p className="mt-0.5 text-[10px] font-semibold">
+                  My Dashboard
+                </p>
+              </div>
+
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-500/10">
+                <Users className="h-3 w-3 text-blue-400" />
+              </div>
+            </div>
+
+            {/* Stats */}
+
+            <div className="mb-3 grid grid-cols-3 gap-2">
+
+              <MiniStat
+                icon={<FolderOpen />}
+                value="128"
+                label="Files"
+              />
+
+              <MiniStat
+                icon={<Share2 />}
+                value="24"
+                label="Shared"
+              />
+
+              <MiniStat
+                icon={<ShieldCheck />}
+                value="98%"
+                label="Secure"
+              />
+            </div>
+
+            {/* Recent files */}
+
+            <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+
+              <div className="mb-3 flex items-center justify-between">
+
+                <p className="text-[8px] font-semibold">
+                  Recent Files
+                </p>
+
+                <span className="text-[7px] text-blue-400">
+                  View all
+                </span>
+              </div>
+
+              <div className="space-y-2">
+
+                <FileRow
+                  name="Project Report.pdf"
+                  size="2.4 MB"
+                />
+
+                <FileRow
+                  name="Presentation.pptx"
+                  size="5.8 MB"
+                />
+
+                <FileRow
+                  name="Database.sql"
+                  size="1.2 MB"
+                />
+
+                <FileRow
+                  name="Images.zip"
+                  size="18.5 MB"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -643,7 +847,41 @@ function MiniDashboard() {
   );
 }
 
-function DashboardBox({
+/* =========================================================
+   MINI NAV
+========================================================= */
+
+function MiniNav({
+  icon,
+  text,
+  active = false,
+}: {
+  icon: React.ReactNode;
+  text: string;
+  active?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[7px] ${
+        active
+          ? "bg-blue-500/10 text-blue-300"
+          : "text-slate-600"
+      }`}
+    >
+      <span className="[&>svg]:h-2.5 [&>svg]:w-2.5">
+        {icon}
+      </span>
+
+      {text}
+    </div>
+  );
+}
+
+/* =========================================================
+   MINI STAT
+========================================================= */
+
+function MiniStat({
   icon,
   value,
   label,
@@ -654,7 +892,8 @@ function DashboardBox({
 }) {
   return (
     <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2">
-      <div className="mb-1 text-blue-400">
+
+      <div className="mb-1 text-blue-400 [&>svg]:h-3 [&>svg]:w-3">
         {icon}
       </div>
 
@@ -662,35 +901,39 @@ function DashboardBox({
         {value}
       </p>
 
-      <p className="text-[7px] text-slate-600">
+      <p className="mt-0.5 text-[6px] text-slate-600">
         {label}
       </p>
     </div>
   );
 }
 
-function SmallFile({
-  icon,
+/* =========================================================
+   FILE ROW
+========================================================= */
+
+function FileRow({
   name,
   size,
 }: {
-  icon: React.ReactNode;
   name: string;
   size: string;
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-white/[0.04] py-2 last:border-0">
-      <div className="flex items-center gap-2">
-        <div className="text-blue-400">
-          {icon}
+    <div className="flex items-center justify-between border-b border-white/[0.04] pb-2 last:border-0 last:pb-0">
+
+      <div className="flex min-w-0 items-center gap-2">
+
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-blue-500/[0.07]">
+          <FolderOpen className="h-3 w-3 text-blue-400" />
         </div>
 
-        <span className="text-[8px] text-slate-400">
+        <span className="truncate text-[7px] text-slate-400">
           {name}
         </span>
       </div>
 
-      <span className="text-[7px] text-slate-600">
+      <span className="ml-2 shrink-0 text-[6px] text-slate-700">
         {size}
       </span>
     </div>
@@ -698,73 +941,45 @@ function SmallFile({
 }
 
 /* =========================================================
-   ICON HELPERS
+   GOOGLE ICON
+========================================================= */
+
+function GoogleIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <path
+        d="M21.35 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h5.22a4.46 4.46 0 0 1-1.94 2.93v2.43h3.14c1.84-1.69 2.93-4.18 2.93-7.39Z"
+        fill="#4285F4"
+      />
+
+      <path
+        d="M12 21.67c2.63 0 4.84-.87 6.45-2.36l-3.14-2.43c-.87.58-1.98.92-3.31.92-2.54 0-4.69-1.72-5.46-4.03H3.29v2.51A9.74 9.74 0 0 0 12 21.67Z"
+        fill="#34A853"
+      />
+
+      <path
+        d="M6.54 13.77a5.85 5.85 0 0 1 0-3.54V7.72H3.29a9.74 9.74 0 0 0 0 8.56l3.25-2.51Z"
+        fill="#FBBC05"
+      />
+
+      <path
+        d="M12 6.2c1.43 0 2.72.49 3.73 1.46l2.8-2.8C16.84 3.3 14.63 2.33 12 2.33a9.74 9.74 0 0 0-8.71 5.39l3.25 2.51C7.31 7.92 9.46 6.2 12 6.2Z"
+        fill="#EA4335"
+      />
+    </svg>
+  );
+}
+
+/* =========================================================
+   SPINNER
 ========================================================= */
 
 function Spinner() {
   return (
     <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
   );
-}
-
-function GoogleIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      aria-hidden="true"
-    >
-      <path
-        fill="#4285F4"
-        d="M21.35 12.23c0-.71-.06-1.39-.18-2.05H12v3.88h5.24a4.48 4.48 0 0 1-1.94 2.94v2.45h3.14c1.84-1.69 2.91-4.18 2.91-7.22Z"
-      />
-
-      <path
-        fill="#34A853"
-        d="M12 21.77c2.63 0 4.84-.87 6.45-2.36l-3.14-2.45c-.87.58-1.98.92-3.31.92-2.54 0-4.7-1.72-5.47-4.03H3.28v2.53A9.75 9.75 0 0 0 12 21.77Z"
-      />
-
-      <path
-        fill="#FBBC05"
-        d="M6.53 13.85A5.86 5.86 0 0 1 6.22 12c0-.64.11-1.26.31-1.85V7.62H3.28A9.76 9.76 0 0 0 2.25 12c0 1.57.38 3.05 1.03 4.38l3.25-2.53Z"
-      />
-
-      <path
-        fill="#EA4335"
-        d="M12 6.12c1.43 0 2.71.49 3.72 1.45l2.79-2.79C16.83 3.21 14.62 2.23 12 2.23a9.75 9.75 0 0 0-8.72 5.39l3.25 2.53C7.3 7.84 9.46 6.12 12 6.12Z"
-      />
-    </svg>
-  );
-}
-
-function ShareIcon() {
-  return <Share2 className="h-5 w-5" />;
-}
-
-function FileText() {
-  return <File className="h-3 w-3" />;
-}
-
-function FileImage() {
-  return <File className="h-3 w-3" />;
-}
-
-function HardDrive() {
-  return <HardDriveIcon className="h-3.5 w-3.5" />;
-}
-
-function Share2() {
-  return <Share2Icon className="h-3.5 w-3.5" />;
-}
-
-function HardDriveIcon(props: React.ComponentProps<"svg">) {
-  return <HardDrive {...props} />;
-}
-
-function FolderOpenIcon(props: React.ComponentProps<"svg">) {
-  return <FolderOpen {...props} />;
-}
-
-function Share2Icon(props: React.ComponentProps<"svg">) {
-  return <Share2 {...props} />;
 }
