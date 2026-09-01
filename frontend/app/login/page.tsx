@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Lock,
   ShieldCheck,
+   Zap,
   Sparkles,
   Upload,
 } from "lucide-react";
@@ -734,10 +735,6 @@ function GoogleIcon() {
       />
     </svg>
   );
-}
-
-function ZapIcon() {
-  return <Zap className="h-5 w-5" />;
 }
 
 function ShareIcon() {
