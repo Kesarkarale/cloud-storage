@@ -756,10 +756,6 @@ function HardDrive() {
   return <HardDriveIcon className="h-3.5 w-3.5" />;
 }
 
-function FolderOpen() {
-  return <FolderOpenIcon className="h-3.5 w-3.5" />;
-}
-
 function Share2() {
   return <Share2Icon className="h-3.5 w-3.5" />;
 }
