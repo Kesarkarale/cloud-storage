@@ -556,304 +556,329 @@ export default function LoginPage() {
           </div>
         </section>
 
-        {/* ===================================================
-            RIGHT LOGIN PANEL
-        ==================================================== */}
+                     {/* ===================================================
+      RIGHT LOGIN PANEL
+  =================================================== */}
 
-        <section className="flex items-center justify-center px-5 py-12 sm:px-8 lg:px-12">
-          <div className="w-full max-w-[430px]">
-            {/* Back link */}
+  <section
+    className="
+      flex min-h-screen
+      items-start justify-center
+      px-5 pt-10 pb-10
+      sm:px-8 sm:pt-12
+      lg:h-screen lg:overflow-y-auto
+      lg:px-12 lg:pt-20
+      xl:pt-24
+    "
+  >
 
-            <Link
-              href="/"
-              className={`mb-8 hidden items-center gap-2 text-sm transition sm:inline-flex ${
-                isDark
-                  ? "text-slate-500 hover:text-slate-200"
-                  : "text-slate-500 hover:text-slate-900"
-              }`}
+    <div className="w-full max-w-[430px]">
+
+      {/* Back link */}
+
+      <Link
+        href="/"
+        className="
+          mb-7 hidden
+          items-center gap-2
+          text-sm text-slate-600
+          transition hover:text-slate-300
+          sm:inline-flex
+        "
+      >
+        <span>←</span>
+        Back to CloudVault
+      </Link>
+
+
+      {/* Header */}
+
+      <div className="mb-7">
+
+        <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-blue-400/10 bg-blue-500/[0.08]">
+          <Lock className="h-5 w-5 text-blue-400" />
+        </div>
+
+        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+          Welcome back
+        </h1>
+
+        <p className="mt-3 text-sm leading-6 text-slate-500 sm:text-base">
+          Sign in to continue to your CloudVault account.
+        </p>
+
+      </div>
+
+
+      {/* Error */}
+
+      {error && (
+        <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/[0.07] px-4 py-3.5 text-sm text-red-300">
+
+          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-400" />
+
+          <span>{error}</span>
+
+        </div>
+      )}
+
+
+      {/* LOGIN CARD */}
+
+      <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-5 shadow-2xl shadow-black/20 sm:p-6">
+
+        <form
+          onSubmit={handleLogin}
+          className="space-y-5"
+        >
+
+          {/* Email */}
+
+          <div>
+
+            <label
+              htmlFor="email"
+              className="mb-2.5 block text-sm font-medium text-slate-200"
             >
-              <span>←</span>
-              Back to CloudVault
-            </Link>
+              Email address
+            </label>
 
-            {/* Header */}
+            <input
+              id="email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="
+                h-12 w-full rounded-xl
+                border border-white/[0.09]
+                bg-[#080d18]
+                px-4 text-sm text-white
+                outline-none transition
+                placeholder:text-slate-700
+                hover:border-white/[0.14]
+                focus:border-blue-500/60
+                focus:ring-4
+                focus:ring-blue-500/10
+              "
+            />
 
-            <div className="mb-8">
-              <div
-                className={`mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border ${
-                  isDark
-                    ? "border-blue-400/10 bg-blue-500/[0.08]"
-                    : "border-blue-100 bg-blue-50"
-                }`}
+          </div>
+
+
+          {/* Password */}
+
+          <div>
+
+            <div className="mb-2.5 flex items-center justify-between">
+
+              <label
+                htmlFor="password"
+                className="text-sm font-medium text-slate-200"
               >
-                <Lock className="h-5 w-5 text-blue-500" />
-              </div>
-
-              <h1
-                className={`text-3xl font-bold tracking-tight sm:text-4xl ${
-                  isDark
-                    ? "text-white"
-                    : "text-slate-900"
-                }`}
-              >
-                Welcome back
-              </h1>
-
-              <p
-                className={`mt-3 text-sm leading-6 sm:text-base ${
-                  isDark
-                    ? "text-slate-500"
-                    : "text-slate-500"
-                }`}
-              >
-                Sign in to continue to your
-                CloudVault account.
-              </p>
-            </div>
-
-            {/* Error */}
-
-            {error && (
-              <div
-                className={`mb-6 flex items-start gap-3 rounded-xl border px-4 py-3.5 text-sm ${
-                  isDark
-                    ? "border-red-500/20 bg-red-500/[0.07] text-red-300"
-                    : "border-red-200 bg-red-50 text-red-600"
-                }`}
-              >
-                <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-500" />
-
-                <span>{error}</span>
-              </div>
-            )}
-
-            {/* =================================================
-                LOGIN CARD
-            ================================================== */}
-
-            <div
-              className={`rounded-2xl border p-5 transition-colors duration-300 sm:p-6 ${cardClass}`}
-            >
-              <form
-                onSubmit={handleLogin}
-                className="space-y-5"
-              >
-                {/* Email */}
-
-                <div>
-                  <label
-                    htmlFor="email"
-                    className={`mb-2.5 block text-sm font-medium ${
-                      isDark
-                        ? "text-slate-200"
-                        : "text-slate-700"
-                    }`}
-                  >
-                    Email address
-                  </label>
-
-                  <input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    required
-                    value={email}
-                    onChange={(e) =>
-                      setEmail(e.target.value)
-                    }
-                    placeholder="you@example.com"
-                    className={`h-12 w-full rounded-xl border px-4 text-sm outline-none transition placeholder:text-slate-400 focus:ring-4 focus:ring-blue-500/10 ${inputClass}`}
-                  />
-                </div>
-
-                {/* Password */}
-
-                <div>
-                  <div className="mb-2.5 flex items-center justify-between">
-                    <label
-                      htmlFor="password"
-                      className={`text-sm font-medium ${
-                        isDark
-                          ? "text-slate-200"
-                          : "text-slate-700"
-                      }`}
-                    >
-                      Password
-                    </label>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setError(
-                          "Password reset is not configured yet."
-                        )
-                      }
-                      className="text-xs font-medium text-blue-500 transition hover:text-blue-400"
-                    >
-                      Forgot password?
-                    </button>
-                  </div>
-
-                  <div className="relative">
-                    <input
-                      id="password"
-                      type={
-                        showPassword
-                          ? "text"
-                          : "password"
-                      }
-                      autoComplete="current-password"
-                      required
-                      value={password}
-                      onChange={(e) =>
-                        setPassword(e.target.value)
-                      }
-                      placeholder="Enter your password"
-                      className={`h-12 w-full rounded-xl border px-4 pr-12 text-sm outline-none transition placeholder:text-slate-400 focus:ring-4 focus:ring-blue-500/10 ${inputClass}`}
-                    />
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShowPassword(
-                          !showPassword
-                        )
-                      }
-                      className={`absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-2 transition ${
-                        isDark
-                          ? "text-slate-600 hover:bg-white/5 hover:text-slate-300"
-                          : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                      }`}
-                      aria-label={
-                        showPassword
-                          ? "Hide password"
-                          : "Show password"
-                      }
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Sign in */}
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="group flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-semibold text-white shadow-lg shadow-blue-600/15 transition duration-300 hover:bg-blue-500 hover:shadow-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? (
-                    <>
-                      <Spinner />
-                      Signing in...
-                    </>
-                  ) : (
-                    <>
-                      Sign in
-
-                      <ArrowRight className="h-4 w-4 transition duration-300 group-hover:translate-x-1" />
-                    </>
-                  )}
-                </button>
-              </form>
-
-              {/* Divider */}
-
-              <div className="my-7 flex items-center gap-4">
-                <div
-                  className={`h-px flex-1 ${
-                    isDark
-                      ? "bg-white/[0.07]"
-                      : "bg-slate-200"
-                  }`}
-                />
-
-                <span
-                  className={`text-[10px] font-medium tracking-widest ${
-                    isDark
-                      ? "text-slate-700"
-                      : "text-slate-400"
-                  }`}
-                >
-                  OR
-                </span>
-
-                <div
-                  className={`h-px flex-1 ${
-                    isDark
-                      ? "bg-white/[0.07]"
-                      : "bg-slate-200"
-                  }`}
-                />
-              </div>
-
-              {/* Google */}
+                Password
+              </label>
 
               <button
                 type="button"
-                onClick={handleGoogleLogin}
-                disabled={googleLoading}
-                className={`flex h-12 w-full items-center justify-center gap-3 rounded-xl border text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${secondaryButtonClass}`}
+                onClick={() =>
+                  setError(
+                    "Password reset is not configured yet."
+                  )
+                }
+                className="text-xs font-medium text-blue-400 transition hover:text-blue-300"
               >
-                {googleLoading ? (
-                  <>
-                    <Spinner dark={!isDark} />
+                Forgot password?
+              </button>
 
-                    Connecting to Google...
-                  </>
+            </div>
+
+            <div className="relative">
+
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                className="
+                  h-12 w-full rounded-xl
+                  border border-white/[0.09]
+                  bg-[#080d18]
+                  px-4 pr-12
+                  text-sm text-white
+                  outline-none transition
+                  placeholder:text-slate-700
+                  hover:border-white/[0.14]
+                  focus:border-blue-500/60
+                  focus:ring-4
+                  focus:ring-blue-500/10
+                "
+              />
+
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="
+                  absolute right-3 top-1/2
+                  -translate-y-1/2
+                  rounded-lg p-2
+                  text-slate-600
+                  transition
+                  hover:bg-white/5
+                  hover:text-slate-300
+                "
+                aria-label={
+                  showPassword
+                    ? "Hide password"
+                    : "Show password"
+                }
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
                 ) : (
-                  <>
-                    <GoogleIcon />
-
-                    Continue with Google
-                  </>
+                  <Eye className="h-4 w-4" />
                 )}
               </button>
+
             </div>
 
-            {/* Register */}
-
-            <p
-              className={`mt-7 text-center text-sm ${
-                isDark
-                  ? "text-slate-500"
-                  : "text-slate-500"
-              }`}
-            >
-              Don't have an account?{" "}
-
-              <Link
-                href="/register"
-                className="font-semibold text-blue-500 transition hover:text-blue-400"
-              >
-                Create an account
-              </Link>
-            </p>
-
-            {/* Security */}
-
-            <div
-              className={`mt-6 flex items-center justify-center gap-2 text-[11px] ${
-                isDark
-                  ? "text-slate-700"
-                  : "text-slate-400"
-              }`}
-            >
-              <ShieldCheck className="h-3.5 w-3.5" />
-
-              Your connection is securely protected
-            </div>
           </div>
-        </section>
-      </div>
-    </main>
-  );
-}
 
+
+          {/* Sign in */}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="
+              group flex h-12 w-full
+              items-center justify-center gap-2
+              rounded-xl
+              bg-blue-600
+              text-sm font-semibold
+              shadow-lg shadow-blue-600/15
+              transition duration-300
+              hover:bg-blue-500
+              hover:shadow-blue-500/20
+              disabled:cursor-not-allowed
+              disabled:opacity-60
+            "
+          >
+
+            {loading ? (
+              <>
+                <Spinner />
+                Signing in...
+              </>
+            ) : (
+              <>
+                Sign in
+
+                <ArrowRight
+                  className="
+                    h-4 w-4
+                    transition duration-300
+                    group-hover:translate-x-1
+                  "
+                />
+              </>
+            )}
+
+          </button>
+
+        </form>
+
+
+        {/* Divider */}
+
+        <div className="my-6 flex items-center gap-4">
+
+          <div className="h-px flex-1 bg-white/[0.07]" />
+
+          <span className="text-[10px] font-medium tracking-widest text-slate-700">
+            OR
+          </span>
+
+          <div className="h-px flex-1 bg-white/[0.07]" />
+
+        </div>
+
+
+        {/* Google */}
+
+        <button
+          type="button"
+          onClick={handleGoogleLogin}
+          disabled={googleLoading}
+          className="
+            flex h-12 w-full
+            items-center justify-center gap-3
+            rounded-xl
+            border border-white/[0.09]
+            bg-[#080d18]
+            text-sm font-medium
+            text-slate-200
+            transition
+            hover:border-white/[0.14]
+            hover:bg-white/[0.04]
+            disabled:cursor-not-allowed
+            disabled:opacity-60
+          "
+        >
+
+          {googleLoading ? (
+            <>
+              <Spinner />
+              Connecting to Google...
+            </>
+          ) : (
+            <>
+              <GoogleIcon />
+              Continue with Google
+            </>
+          )}
+
+        </button>
+
+      </div>
+
+
+      {/* Register */}
+
+      <p className="mt-6 text-center text-sm text-slate-500">
+
+        Don't have an account?{" "}
+
+        <Link
+          href="/register"
+          className="font-semibold text-blue-400 transition hover:text-blue-300"
+        >
+          Create an account
+        </Link>
+
+      </p>
+
+
+      {/* Security */}
+
+      <div className="mt-5 flex items-center justify-center gap-2 text-[11px] text-slate-700">
+
+        <ShieldCheck className="h-3.5 w-3.5" />
+
+        Your connection is securely protected
+
+      </div>
+
+    </div>
+
+  </section>
+
+</div>
 /* =========================================================
    BENEFIT COMPONENT
 ========================================================= */
