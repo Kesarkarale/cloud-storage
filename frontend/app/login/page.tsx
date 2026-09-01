@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -15,8 +14,10 @@ export default function LoginPage() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Check OAuth errors after the page loads
   useEffect(() => {
-    const oauthError = searchParams.get("error");
+    const params = new URLSearchParams(window.location.search);
+    const oauthError = params.get("error");
 
     if (oauthError === "oauth_failed") {
       setError("Google login failed. Please try again.");
@@ -25,23 +26,35 @@ export default function LoginPage() {
     if (oauthError === "google_email_missing") {
       setError("Could not get your Google email.");
     }
-  }, [searchParams]);
+  }, []);
 
-  async function handleLogin(e: FormEvent<HTMLFormElement>) {
+  // =========================
+  // NORMAL LOGIN
+  // =========================
+
+  async function handleLogin(
+    e: FormEvent<HTMLFormElement>
+  ) {
     e.preventDefault();
 
     setError("");
 
     if (!email.trim() || !password) {
-      setError("Please enter your email and password.");
+      setError(
+        "Please enter your email and password."
+      );
       return;
     }
 
     setLoading(true);
 
     try {
+      const apiUrl =
+        process.env.NEXT_PUBLIC_API_URL ||
+        "http://localhost:8080";
+
       const response = await fetch(
-        "http://localhost:8080/api/auth/login",
+        `${apiUrl}/api/auth/login`,
         {
           method: "POST",
           headers: {
@@ -54,18 +67,22 @@ export default function LoginPage() {
         }
       );
 
-      const contentType = response.headers.get("content-type");
+      const contentType =
+        response.headers.get("content-type");
 
       let data: unknown;
 
-      if (contentType?.includes("application/json")) {
+      if (
+        contentType?.includes("application/json")
+      ) {
         data = await response.json();
       } else {
         data = await response.text();
       }
 
       if (!response.ok) {
-        let message = "Invalid email or password.";
+        let message =
+          "Invalid email or password.";
 
         if (
           typeof data === "object" &&
@@ -73,10 +90,13 @@ export default function LoginPage() {
           "message" in data
         ) {
           message = String(
-            (data as { message?: unknown }).message ||
-              message
+            (data as { message?: unknown })
+              .message || message
           );
-        } else if (typeof data === "string" && data.trim()) {
+        } else if (
+          typeof data === "string" &&
+          data.trim()
+        ) {
           message = data;
         }
 
@@ -85,7 +105,10 @@ export default function LoginPage() {
 
       let token: string | null = null;
 
-      if (typeof data === "object" && data !== null) {
+      if (
+        typeof data === "object" &&
+        data !== null
+      ) {
         const objectData = data as {
           token?: string;
           accessToken?: string;
@@ -99,7 +122,10 @@ export default function LoginPage() {
           null;
       }
 
-      if (!token && typeof data === "string") {
+      if (
+        !token &&
+        typeof data === "string"
+      ) {
         token = data;
       }
 
@@ -123,20 +149,32 @@ export default function LoginPage() {
     }
   }
 
+  // =========================
+  // GOOGLE LOGIN
+  // =========================
+
   function handleGoogleLogin() {
     setError("");
     setGoogleLoading(true);
 
+    const apiUrl =
+      process.env.NEXT_PUBLIC_API_URL ||
+      "http://localhost:8080";
+
     window.location.href =
-      "http://localhost:8080/oauth2/authorization/google";
+      `${apiUrl}/oauth2/authorization/google`;
   }
 
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="grid min-h-screen lg:grid-cols-2">
 
-        {/* Left Side */}
+        {/* =================================
+            LEFT SIDE
+        ================================= */}
+
         <div className="hidden flex-col justify-between bg-gradient-to-br from-blue-700 via-blue-800 to-slate-950 p-12 lg:flex">
+
           <Link
             href="/"
             className="flex items-center gap-3 text-xl font-bold"
@@ -149,6 +187,7 @@ export default function LoginPage() {
           </Link>
 
           <div className="max-w-lg">
+
             <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-blue-200">
               Secure Cloud Storage
             </p>
@@ -162,19 +201,27 @@ export default function LoginPage() {
             </h2>
 
             <p className="mt-6 text-lg leading-8 text-blue-100/80">
-              Store, manage and access your files securely
-              from anywhere.
+              Store, manage and access your files
+              securely from anywhere.
             </p>
+
           </div>
 
           <p className="text-sm text-blue-200/60">
             © 2026 CloudStore
           </p>
+
         </div>
 
-        {/* Right Side */}
+        {/* =================================
+            RIGHT SIDE
+        ================================= */}
+
         <div className="flex items-center justify-center px-6 py-12">
+
           <div className="w-full max-w-md">
+
+            {/* Mobile Back */}
 
             <Link
               href="/"
@@ -183,7 +230,10 @@ export default function LoginPage() {
               ← Back to CloudStore
             </Link>
 
+            {/* Header */}
+
             <div className="mb-8">
+
               <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-xl font-bold">
                 C
               </div>
@@ -193,9 +243,13 @@ export default function LoginPage() {
               </h1>
 
               <p className="mt-2 text-slate-400">
-                Sign in to continue to your CloudStore account.
+                Sign in to continue to your
+                CloudStore account.
               </p>
+
             </div>
+
+            {/* Error */}
 
             {error && (
               <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -203,11 +257,17 @@ export default function LoginPage() {
               </div>
             )}
 
+            {/* Login Form */}
+
             <form
               onSubmit={handleLogin}
               className="space-y-5"
             >
+
+              {/* Email */}
+
               <div>
+
                 <label
                   htmlFor="email"
                   className="mb-2 block text-sm font-medium text-slate-200"
@@ -221,14 +281,21 @@ export default function LoginPage() {
                   autoComplete="email"
                   required
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) =>
+                    setEmail(e.target.value)
+                  }
                   placeholder="you@example.com"
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3.5 text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
+
               </div>
 
+              {/* Password */}
+
               <div>
+
                 <div className="mb-2 flex items-center justify-between">
+
                   <label
                     htmlFor="password"
                     className="text-sm font-medium text-slate-200"
@@ -242,6 +309,7 @@ export default function LoginPage() {
                   >
                     Forgot password?
                   </button>
+
                 </div>
 
                 <input
@@ -250,22 +318,33 @@ export default function LoginPage() {
                   autoComplete="current-password"
                   required
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) =>
+                    setPassword(e.target.value)
+                  }
                   placeholder="Enter your password"
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3.5 text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 />
+
               </div>
+
+              {/* Login */}
 
               <button
                 type="submit"
                 disabled={loading}
                 className="w-full rounded-xl bg-blue-600 py-3.5 font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {loading ? "Signing in..." : "Sign in"}
+                {loading
+                  ? "Signing in..."
+                  : "Sign in"}
               </button>
+
             </form>
 
+            {/* Divider */}
+
             <div className="my-7 flex items-center gap-4">
+
               <div className="h-px flex-1 bg-slate-800" />
 
               <span className="text-xs text-slate-500">
@@ -273,32 +352,47 @@ export default function LoginPage() {
               </span>
 
               <div className="h-px flex-1 bg-slate-800" />
+
             </div>
+
+            {/* Google */}
 
             <button
               type="button"
               onClick={handleGoogleLogin}
               disabled={googleLoading}
-              className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-700 bg-slate-900 py-3.5 font-medium transition hover:bg-slate-800 disabled:opacity-60"
+              className="flex w-full items-center justify-center gap-3 rounded-xl border border-slate-700 bg-slate-900 py-3.5 font-medium transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <span className="text-lg font-bold">G</span>
+
+              <span className="text-lg font-bold">
+                G
+              </span>
 
               {googleLoading
                 ? "Connecting to Google..."
                 : "Continue with Google"}
+
             </button>
 
+            {/* Register */}
+
             <p className="mt-8 text-center text-sm text-slate-400">
+
               Don't have an account?{" "}
+
               <Link
                 href="/register"
                 className="font-semibold text-blue-400 hover:text-blue-300"
               >
                 Create an account
               </Link>
+
             </p>
+
           </div>
+
         </div>
+
       </div>
     </main>
   );
