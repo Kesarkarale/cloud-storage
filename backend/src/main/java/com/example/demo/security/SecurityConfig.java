@@ -106,7 +106,7 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(
                 List.of(
                         "http://localhost:3000",
-                        "https://YOUR-VERCEL-DOMAIN.vercel.app"
+                        "https://cloud-storage-tan.vercel.app"
                 )
         );
 
