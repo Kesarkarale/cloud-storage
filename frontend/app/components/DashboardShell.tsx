@@ -509,7 +509,7 @@ export default function DashboardShell({
                     <Sun className="h-4 w-4 text-amber-500" />
 
                     <span className="hidden sm:block">
-                      Light
+                      Dark
                     </span>
                   </>
                 ) : (
@@ -517,7 +517,7 @@ export default function DashboardShell({
                     <Moon className="h-4 w-4 text-blue-600" />
 
                     <span className="hidden sm:block">
-                      Dark
+                      Light
                     </span>
                   </>
                 )}
