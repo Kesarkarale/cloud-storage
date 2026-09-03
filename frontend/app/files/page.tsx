@@ -2,29 +2,36 @@
 
 import {
   AlertCircle,
-  Archive,
-  Check,
-  ChevronDown,
-  Clock3,
+  ArrowDownAZ,
+  ArrowUpAZ,
+  ChevronRight,
   Download,
-  File as FileIconLucide,
+  File as FileIcon,
+  FileArchive,
+  FileAudio,
+  FileCode2,
   FileImage,
+  FileSpreadsheet,
   FileText,
+  FileVideo,
   Folder,
   FolderOpen,
+  FolderPlus,
   Grid2X2,
-  HardDrive,
   List,
   Loader2,
   MoreHorizontal,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
   X,
-  CloudUpload,
 } from "lucide-react";
 
 import {
+  ChangeEvent,
+  DragEvent,
+  MouseEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -32,877 +39,1390 @@ import {
   useState,
 } from "react";
 
-import type {
-  ChangeEvent,
-  DragEvent,
-  KeyboardEvent as ReactKeyboardEvent,
-  ReactNode,
-  RefObject,
-} from "react";
-
-import DashboardShell from "../components/DashboardShell";
+import DashboardShell from "@/components/DashboardShell";
 
 /* =========================================================
    TYPES
 ========================================================= */
 
-type FileType =
-  | "folder"
-  | "pdf"
-  | "image"
-  | "document"
-  | "zip"
-  | "other";
+type UUID = string;
 
-type FileItem = {
-  id: string;
+interface FileItem {
+  id: UUID;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  filePath?: string;
+  userId?: UUID;
+  parentFolderId?: UUID | null;
+  createdAt: string;
+}
+
+interface FolderItem {
+  id: UUID;
   name: string;
-  type: FileType;
-  size: number;
-  fileType?: string;
-  modified: string;
-  modifiedTimestamp: number;
-};
+  folderName?: string;
+  userId?: UUID;
+  parentFolderId?: UUID | null;
+  createdAt?: string;
+}
 
-type ToastType = "success" | "error";
+interface BreadcrumbItem {
+  id: UUID | null;
+  name: string;
+}
 
-type ToastState = {
-  type: ToastType;
-  message: string;
-};
+type SortKey = "name" | "size" | "date";
+type SortDirection = "asc" | "desc";
+type ViewMode = "grid" | "list";
 
 /* =========================================================
-   CONFIG
+   API
 ========================================================= */
 
-const API_URL = (
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:8080"
-).replace(/\/+$/, "");
-
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
-
-// Current backend does not expose storage-limit API.
-// Keep this as the frontend display limit for now.
-const STORAGE_LIMIT = 10 * 1024 * 1024 * 1024;
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 /* =========================================================
-   PAGE
+   HELPERS
+========================================================= */
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const possibleKeys = [
+    "token",
+    "accessToken",
+    "jwt",
+    "authToken",
+    "cloudstorage_token",
+    "cloud-storage-token",
+  ];
+
+  for (const key of possibleKeys) {
+    const value = localStorage.getItem(key);
+
+    if (value && value.trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const token = getToken();
+
+  return {
+    ...(token
+      ? {
+          Authorization: token.startsWith("Bearer ")
+            ? token
+            : `Bearer ${token}`,
+        }
+      : {}),
+    ...extra,
+  };
+}
+
+async function parseApiError(response: Response): Promise<string> {
+  try {
+    const contentType = response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+
+      return (
+        data?.message ||
+        data?.error ||
+        data?.detail ||
+        `Request failed (${response.status})`
+      );
+    }
+
+    const text = await response.text();
+
+    if (text) {
+      return text;
+    }
+  } catch {
+    // Ignore parse error.
+  }
+
+  return `Request failed (${response.status})`;
+}
+
+function normalizeFile(value: any): FileItem {
+  return {
+    id: String(value?.id ?? ""),
+    fileName:
+      value?.fileName ??
+      value?.filename ??
+      value?.name ??
+      "Unnamed file",
+    fileType:
+      value?.fileType ??
+      value?.contentType ??
+      value?.mimeType ??
+      "application/octet-stream",
+    fileSize: Number(value?.fileSize ?? value?.size ?? 0),
+    filePath: value?.filePath,
+    userId: value?.userId,
+    parentFolderId:
+      value?.parentFolderId ??
+      value?.parent_folder_id ??
+      null,
+    createdAt:
+      value?.createdAt ??
+      value?.created_at ??
+      new Date().toISOString(),
+  };
+}
+
+function normalizeFolder(value: any): FolderItem {
+  return {
+    id: String(value?.id ?? ""),
+    name:
+      value?.name ??
+      value?.folderName ??
+      value?.folder_name ??
+      "Untitled folder",
+    folderName: value?.folderName,
+    userId: value?.userId,
+    parentFolderId:
+      value?.parentFolderId ??
+      value?.parent_folder_id ??
+      null,
+    createdAt:
+      value?.createdAt ??
+      value?.created_at,
+  };
+}
+
+function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
+
+  const size = bytes / Math.pow(1024, index);
+
+  return `${size.toFixed(index === 0 ? 0 : size >= 10 ? 1 : 2)} ${
+    units[index]
+  }`;
+}
+
+function formatDate(value?: string): string {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function getExtension(fileName: string): string {
+  const parts = fileName.split(".");
+
+  if (parts.length < 2) return "";
+
+  return parts.pop()?.toLowerCase() || "";
+}
+
+function getFileCategory(file: FileItem): string {
+  const type = file.fileType?.toLowerCase() || "";
+  const ext = getExtension(file.fileName);
+
+  if (type.startsWith("image/")) return "image";
+
+  if (
+    type.startsWith("video/") ||
+    ["mp4", "webm", "mov", "mkv", "avi"].includes(ext)
+  ) {
+    return "video";
+  }
+
+  if (
+    type.startsWith("audio/") ||
+    ["mp3", "wav", "ogg", "m4a", "aac", "flac"].includes(ext)
+  ) {
+    return "audio";
+  }
+
+  if (
+    type === "application/pdf" ||
+    ext === "pdf"
+  ) {
+    return "pdf";
+  }
+
+  if (
+    type.includes("spreadsheet") ||
+    type.includes("excel") ||
+    ["xls", "xlsx", "csv"].includes(ext)
+  ) {
+    return "spreadsheet";
+  }
+
+  if (
+    type.includes("zip") ||
+    type.includes("rar") ||
+    type.includes("7z") ||
+    ["zip", "rar", "7z", "tar", "gz"].includes(ext)
+  ) {
+    return "archive";
+  }
+
+  if (
+    type.includes("text") ||
+    type.includes("word") ||
+    type.includes("document") ||
+    ["txt", "doc", "docx", "rtf"].includes(ext)
+  ) {
+    return "document";
+  }
+
+  if (
+    type.includes("javascript") ||
+    type.includes("typescript") ||
+    type.includes("json") ||
+    type.includes("html") ||
+    type.includes("css") ||
+    ["js", "jsx", "ts", "tsx", "json", "html", "css"].includes(ext)
+  ) {
+    return "code";
+  }
+
+  return "other";
+}
+
+function getFileIcon(file: FileItem, size = 28) {
+  const category = getFileCategory(file);
+
+  switch (category) {
+    case "image":
+      return <FileImage size={size} />;
+
+    case "video":
+      return <FileVideo size={size} />;
+
+    case "audio":
+      return <FileAudio size={size} />;
+
+    case "pdf":
+    case "document":
+      return <FileText size={size} />;
+
+    case "spreadsheet":
+      return <FileSpreadsheet size={size} />;
+
+    case "archive":
+      return <FileArchive size={size} />;
+
+    case "code":
+      return <FileCode2 size={size} />;
+
+    default:
+      return <FileIcon size={size} />;
+  }
+}
+
+function isPreviewable(file: FileItem): boolean {
+  const category = getFileCategory(file);
+
+  return ["image", "video", "audio", "pdf"].includes(category);
+}
+
+function getInitials(name: string): string {
+  const clean = name.trim();
+
+  if (!clean) return "F";
+
+  const words = clean.split(/\s+/);
+
+  if (words.length === 1) {
+    return words[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${words[0][0]}${words[1][0]}`.toUpperCase();
+}
+
+/* =========================================================
+   MAIN PAGE
 ========================================================= */
 
 export default function FilesPage() {
+  /* -------------------------------------------------------
+     DATA
+  ------------------------------------------------------- */
+
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [folders, setFolders] = useState<FolderItem[]>([]);
+
+  /* -------------------------------------------------------
+     NAVIGATION
+  ------------------------------------------------------- */
+
+  const [currentFolderId, setCurrentFolderId] =
+    useState<UUID | null>(null);
+
+  const [breadcrumbs, setBreadcrumbs] = useState<
+    BreadcrumbItem[]
+  >([{ id: null, name: "My Files" }]);
+
+  /* -------------------------------------------------------
+     UI
+  ------------------------------------------------------- */
+
+  const [viewMode, setViewMode] =
+    useState<ViewMode>("grid");
 
   const [search, setSearch] = useState("");
 
-  const [view, setView] =
-    useState<"grid" | "list">("grid");
+  const [sortKey, setSortKey] =
+    useState<SortKey>("date");
 
-  const [sortBy, setSortBy] =
-    useState<"recent" | "name" | "size">("recent");
+  const [sortDirection, setSortDirection] =
+    useState<SortDirection>("desc");
+
+  /* -------------------------------------------------------
+     LOADING
+  ------------------------------------------------------- */
 
   const [loading, setLoading] = useState(true);
-
-  const [refreshing, setRefreshing] =
+  const [uploading, setUploading] = useState(false);
+  const [creatingFolder, setCreatingFolder] =
     useState(false);
 
-  const [uploading, setUploading] =
+  const [deletingId, setDeletingId] =
+    useState<UUID | null>(null);
+
+  const [downloadingId, setDownloadingId] =
+    useState<UUID | null>(null);
+
+  /* -------------------------------------------------------
+     ERRORS
+  ------------------------------------------------------- */
+
+  const [error, setError] = useState("");
+
+  /* -------------------------------------------------------
+     MODALS
+  ------------------------------------------------------- */
+
+  const [showUploadModal, setShowUploadModal] =
     useState(false);
 
-  const [uploadProgress, setUploadProgress] =
-    useState(0);
-
-  const [showUpload, setShowUpload] =
+  const [showFolderModal, setShowFolderModal] =
     useState(false);
 
   const [selectedFile, setSelectedFile] =
     useState<FileItem | null>(null);
 
-  const [dragActive, setDragActive] =
-    useState(false);
+  const [previewFile, setPreviewFile] =
+    useState<FileItem | null>(null);
 
-  const [toast, setToast] =
-    useState<ToastState | null>(null);
+  /* -------------------------------------------------------
+     UPLOAD
+  ------------------------------------------------------- */
 
-  const [deletingId, setDeletingId] =
-    useState<string | null>(null);
+  const [selectedUploadFiles, setSelectedUploadFiles] =
+    useState<globalThis.File[]>([]);
 
-  const [downloadingId, setDownloadingId] =
-    useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef =
-    useRef<HTMLInputElement>(null);
+    useRef<HTMLInputElement | null>(null);
 
-  /* =========================================================
+  /* -------------------------------------------------------
+     FOLDER
+  ------------------------------------------------------- */
+
+  const [folderName, setFolderName] = useState("");
+
+  /* -------------------------------------------------------
      TOAST
-  ========================================================= */
+  ------------------------------------------------------- */
+
+  const [toast, setToast] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  /* =======================================================
+     TOAST
+  ======================================================= */
 
   const showToast = useCallback(
     (
-      type: ToastType,
+      type: "success" | "error",
       message: string
     ) => {
       setToast({
         type,
         message,
       });
+
+      window.setTimeout(() => {
+        setToast(null);
+      }, 3500);
     },
     []
   );
 
+  /* =======================================================
+     AUTH CHECK
+  ======================================================= */
+
   useEffect(() => {
-    if (!toast) return;
+    const token = getToken();
 
-    const timer = window.setTimeout(() => {
-      setToast(null);
-    }, 3500);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [toast]);
-
-  /* =========================================================
-     AUTH TOKEN
-  ========================================================= */
-
-  const getToken = useCallback(() => {
-    if (typeof window === "undefined") {
-      return null;
+    if (!token) {
+      setError(
+        "You are not authenticated. Please login again."
+      );
+      setLoading(false);
     }
-
-    return (
-      localStorage.getItem("accessToken") ||
-      localStorage.getItem("token") ||
-      localStorage.getItem("jwt")
-    );
   }, []);
 
-  /* =========================================================
-     API REQUEST
-  ========================================================= */
+  /* =======================================================
+     LOAD FOLDERS
+  ======================================================= */
 
-  const apiRequest = useCallback(
-    async (
-      endpoint: string,
-      options: RequestInit = {}
-    ) => {
+  const loadFolders = useCallback(
+    async (folderId: UUID | null) => {
+      const token = getToken();
+
+      if (!token) return;
+
+      try {
+        const url = new URL(
+          `${API_BASE}/api/folders`
+        );
+
+        if (folderId) {
+          url.searchParams.set(
+            "parentFolderId",
+            folderId
+          );
+        }
+
+        const response = await fetch(
+          url.toString(),
+          {
+            method: "GET",
+            headers: authHeaders(),
+            cache: "no-store",
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(response)
+          );
+        }
+
+        const data = await response.json();
+
+        const rawFolders = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.folders)
+          ? data.folders
+          : Array.isArray(data?.data)
+          ? data.data
+          : [];
+
+        setFolders(
+          rawFolders
+            .map(normalizeFolder)
+            .filter((folder: FolderItem) => folder.id)
+        );
+      } catch (err) {
+        console.error(
+          "Folder loading error:",
+          err
+        );
+
+        /*
+         * Folder API failure should not prevent
+         * files from loading.
+         */
+        setFolders([]);
+      }
+    },
+    []
+  );
+
+  /* =======================================================
+     LOAD FILES
+  ======================================================= */
+
+  const loadFiles = useCallback(
+    async (folderId: UUID | null) => {
       const token = getToken();
 
       if (!token) {
-        throw new Error(
-          "You are not logged in. Please login again."
-        );
+        setLoading(false);
+        return;
       }
 
-      const headers = new Headers(
-        options.headers
-      );
+      setLoading(true);
+      setError("");
 
-      headers.set(
-        "Authorization",
-        `Bearer ${token}`
-      );
+      try {
+        const url = new URL(
+          `${API_BASE}/api/files`
+        );
 
-      /*
-       * IMPORTANT:
-       * Do NOT manually set Content-Type for FormData.
-       * Browser automatically adds multipart boundary.
-       */
-
-      const response = await fetch(
-        `${API_URL}${endpoint}`,
-        {
-          ...options,
-          headers,
+        if (folderId) {
+          url.searchParams.set(
+            "parentFolderId",
+            folderId
+          );
         }
-      );
 
-      if (!response.ok) {
-        let message =
-          `Request failed (${response.status})`;
-
-        try {
-          const contentType =
-            response.headers.get(
-              "content-type"
-            );
-
-          if (
-            contentType?.includes(
-              "application/json"
-            )
-          ) {
-            const data =
-              await response.json();
-
-            message =
-              data?.message ||
-              data?.error ||
-              message;
-          } else {
-            const text =
-              await response.text();
-
-            if (text.trim()) {
-              message = text;
-            }
+        const response = await fetch(
+          url.toString(),
+          {
+            method: "GET",
+            headers: authHeaders(),
+            cache: "no-store",
           }
-        } catch {
-          // Keep default message.
-        }
+        );
 
-        if (
-          response.status === 401 ||
-          response.status === 403
-        ) {
+        if (response.status === 401) {
           throw new Error(
             "Your session has expired. Please login again."
           );
         }
 
-        throw new Error(message);
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(response)
+          );
+        }
+
+        const data = await response.json();
+
+        const rawFiles = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.files)
+          ? data.files
+          : Array.isArray(data?.data)
+          ? data.data
+          : [];
+
+        setFiles(
+          rawFiles
+            .map(normalizeFile)
+            .filter((file: FileItem) => file.id)
+        );
+      } catch (err: any) {
+        console.error(
+          "File loading error:",
+          err
+        );
+
+        setFiles([]);
+
+        setError(
+          err?.message ||
+            "Unable to load your files."
+        );
+      } finally {
+        setLoading(false);
       }
-
-      return response;
-    },
-    [getToken]
-  );
-
-  /* =========================================================
-     NORMALIZE BACKEND FILE
-  ========================================================= */
-
-  const normalizeFile = useCallback(
-    (item: unknown): FileItem => {
-      const data =
-        item as Record<string, unknown>;
-
-      const rawName =
-        data?.fileName ??
-        data?.name ??
-        "Unnamed file";
-
-      const rawSize =
-        data?.fileSize ??
-        data?.size ??
-        0;
-
-      const numericSize =
-        typeof rawSize === "number"
-          ? rawSize
-          : Number(rawSize) || 0;
-
-      const rawType =
-        data?.fileType ??
-        data?.contentType ??
-        "";
-
-      const modifiedValue =
-        data?.updatedAt ??
-        data?.createdAt ??
-        data?.modifiedAt ??
-        data?.uploadedAt ??
-        "";
-
-      const modifiedDate =
-        parseDate(modifiedValue);
-
-      return {
-        id: String(
-          data?.id ??
-            data?.fileId ??
-            crypto.randomUUID()
-        ),
-
-        name: String(rawName),
-
-        type: getFileTypeFromName(
-          String(rawName)
-        ),
-
-        size: numericSize,
-
-        fileType:
-          typeof rawType === "string"
-            ? rawType
-            : undefined,
-
-        modified:
-          formatModifiedDate(
-            modifiedValue
-          ),
-
-        modifiedTimestamp:
-          modifiedDate?.getTime() ?? 0,
-      };
     },
     []
   );
 
-  /* =========================================================
-     LOAD FILES
-  ========================================================= */
+  /* =======================================================
+     LOAD CURRENT FOLDER
+  ======================================================= */
 
-  const loadFiles = useCallback(
-    async (
-      showRefreshLoader = false
-    ) => {
-      try {
-        if (showRefreshLoader) {
-          setRefreshing(true);
-        } else {
-          setLoading(true);
-        }
-
-        const response =
-          await apiRequest(
-            "/api/files"
-          );
-
-        const data =
-          await response.json();
-
-        const backendFiles =
-          Array.isArray(data)
-            ? data
-            : Array.isArray(data?.files)
-            ? data.files
-            : [];
-
-        const normalized =
-          backendFiles.map(
-            normalizeFile
-          );
-
-        setFiles(normalized);
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Unable to load files.";
-
-        showToast(
-          "error",
-          message
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
+  const refreshCurrentFolder = useCallback(
+    async () => {
+      await Promise.all([
+        loadFiles(currentFolderId),
+        loadFolders(currentFolderId),
+      ]);
     },
     [
-      apiRequest,
-      normalizeFile,
-      showToast,
+      currentFolderId,
+      loadFiles,
+      loadFolders,
     ]
   );
 
+  /* =======================================================
+     INITIAL / FOLDER LOAD
+  ======================================================= */
+
   useEffect(() => {
-    loadFiles();
-  }, [loadFiles]);
+    refreshCurrentFolder();
+  }, [refreshCurrentFolder]);
 
-  /* =========================================================
-     FILTER + SORT
-  ========================================================= */
+  /* =======================================================
+     NAVIGATE INTO FOLDER
+  ======================================================= */
 
-  const filteredFiles = useMemo(() => {
-    const query =
-      search.trim().toLowerCase();
+  const openFolder = useCallback(
+    async (folder: FolderItem) => {
+      setCurrentFolderId(folder.id);
 
-    let result = files.filter(
-      (file) =>
-        !query ||
-        file.name
-          .toLowerCase()
-          .includes(query)
-    );
+      setBreadcrumbs((previous) => {
+        const existingIndex =
+          previous.findIndex(
+            (item) => item.id === folder.id
+          );
 
-    if (sortBy === "name") {
-      result = [...result].sort(
-        (a, b) =>
-          a.name.localeCompare(
-            b.name,
-            undefined,
-            {
-              numeric: true,
-              sensitivity: "base",
-            }
-          )
-      );
-    }
+        if (existingIndex >= 0) {
+          return previous.slice(
+            0,
+            existingIndex + 1
+          );
+        }
 
-    if (sortBy === "size") {
-      result = [...result].sort(
-        (a, b) =>
-          b.size - a.size
-      );
-    }
+        return [
+          ...previous,
+          {
+            id: folder.id,
+            name: folder.name,
+          },
+        ];
+      });
 
-    if (sortBy === "recent") {
-      result = [...result].sort(
-        (a, b) =>
-          b.modifiedTimestamp -
-          a.modifiedTimestamp
-      );
-    }
-
-    return result;
-  }, [
-    files,
-    search,
-    sortBy,
-  ]);
-
-  /* =========================================================
-     STORAGE
-  ========================================================= */
-
-  const usedBytes = useMemo(
-    () =>
-      files.reduce(
-        (total, file) =>
-          total + file.size,
-        0
-      ),
-    [files]
+      setSearch("");
+    },
+    []
   );
 
-  const storagePercentage =
-    Math.min(
-      100,
-      (usedBytes /
-        STORAGE_LIMIT) *
-        100
-    );
+  /* =======================================================
+     BREADCRUMB CLICK
+  ======================================================= */
 
-  const freeBytes = Math.max(
-    0,
-    STORAGE_LIMIT - usedBytes
+  const navigateBreadcrumb = useCallback(
+    (index: number) => {
+      const item = breadcrumbs[index];
+
+      if (!item) return;
+
+      setBreadcrumbs(
+        breadcrumbs.slice(0, index + 1)
+      );
+
+      setCurrentFolderId(item.id);
+      setSearch("");
+    },
+    [breadcrumbs]
   );
 
-  /* =========================================================
-     UPLOAD
-  ========================================================= */
+  /* =======================================================
+     CREATE FOLDER
+  ======================================================= */
 
-  async function uploadFiles(
-    selected: globalThis.File[]
-  ) {
-    if (!selected.length) {
+  const createFolder = async () => {
+    const cleanName = folderName.trim();
+
+    if (!cleanName) {
+      showToast(
+        "error",
+        "Please enter a folder name."
+      );
       return;
     }
 
-    const validFiles =
-      selected.filter(
-        (file) =>
-          file.size <=
-          MAX_FILE_SIZE
-      );
+    const token = getToken();
 
-    const rejected =
-      selected.length -
-      validFiles.length;
-
-    if (rejected > 0) {
+    if (!token) {
       showToast(
         "error",
-        `${rejected} file${
-          rejected > 1
-            ? "s"
-            : ""
-        } exceeded the 100 MB limit.`
+        "Please login again."
       );
+      return;
     }
 
-    if (!validFiles.length) {
+    setCreatingFolder(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/folders`,
+        {
+          method: "POST",
+          headers: {
+            ...authHeaders(),
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            name: cleanName,
+            parentFolderId:
+              currentFolderId,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await parseApiError(response)
+        );
+      }
+
+      setFolderName("");
+      setShowFolderModal(false);
+
+      await loadFolders(currentFolderId);
+
+      showToast(
+        "success",
+        "Folder created successfully."
+      );
+    } catch (err: any) {
+      console.error(
+        "Create folder error:",
+        err
+      );
+
+      showToast(
+        "error",
+        err?.message ||
+          "Unable to create folder."
+      );
+    } finally {
+      setCreatingFolder(false);
+    }
+  };
+
+  /* =======================================================
+     SELECT UPLOAD FILES
+  ======================================================= */
+
+  const addUploadFiles = (
+    incoming: globalThis.File[]
+  ) => {
+    const validFiles = incoming.filter(
+      (file) => file.size >= 0
+    );
+
+    setSelectedUploadFiles(
+      (previous) => {
+        const merged = [
+          ...previous,
+          ...validFiles,
+        ];
+
+        const unique = new Map<
+          string,
+          globalThis.File
+        >();
+
+        for (const file of merged) {
+          const key = `${file.name}-${file.size}-${file.lastModified}`;
+
+          if (!unique.has(key)) {
+            unique.set(key, file);
+          }
+        }
+
+        return Array.from(unique.values());
+      }
+    );
+  };
+
+  /* =======================================================
+     INPUT CHANGE
+  ======================================================= */
+
+  const handleFileInput = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const incoming = Array.from(
+      event.target.files || []
+    );
+
+    addUploadFiles(incoming);
+
+    event.target.value = "";
+  };
+
+  /* =======================================================
+     DRAG EVENTS
+  ======================================================= */
+
+  const handleDragOver = (
+    event: DragEvent<HTMLDivElement>
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (
+    event: DragEvent<HTMLDivElement>
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setIsDragging(false);
+  };
+
+  const handleDrop = (
+    event: DragEvent<HTMLDivElement>
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setIsDragging(false);
+
+    const incoming = Array.from(
+      event.dataTransfer.files || []
+    );
+
+    addUploadFiles(incoming);
+  };
+
+  /* =======================================================
+     REMOVE SELECTED UPLOAD
+  ======================================================= */
+
+  const removeUploadFile = (
+    index: number
+  ) => {
+    setSelectedUploadFiles(
+      (previous) =>
+        previous.filter(
+          (_, itemIndex) =>
+            itemIndex !== index
+        )
+    );
+  };
+
+  /* =======================================================
+     UPLOAD FILES
+  ======================================================= */
+
+  const uploadFiles = async () => {
+    if (selectedUploadFiles.length === 0) {
+      showToast(
+        "error",
+        "Please select at least one file."
+      );
+      return;
+    }
+
+    const token = getToken();
+
+    if (!token) {
+      showToast(
+        "error",
+        "Please login again."
+      );
       return;
     }
 
     setUploading(true);
-    setUploadProgress(0);
 
-    let uploadedCount = 0;
+    let successCount = 0;
+    let failedCount = 0;
 
     try {
-      for (
-        const file of validFiles
-      ) {
-        const formData =
-          new FormData();
+      for (const uploadFile of selectedUploadFiles) {
+        try {
+          const formData = new FormData();
 
-        formData.append(
-          "file",
-          file
-        );
+          formData.append(
+            "file",
+            uploadFile
+          );
 
-        await apiRequest(
-          "/api/files/upload",
-          {
-            method: "POST",
-            body: formData,
+          if (currentFolderId) {
+            formData.append(
+              "parentFolderId",
+              currentFolderId
+            );
           }
-        );
 
-        uploadedCount++;
+          const response = await fetch(
+            `${API_BASE}/api/files/upload`,
+            {
+              method: "POST",
+              headers: authHeaders(),
+              body: formData,
+            }
+          );
 
-        setUploadProgress(
-          Math.round(
-            (uploadedCount /
-              validFiles.length) *
-              100
-          )
-        );
+          if (!response.ok) {
+            throw new Error(
+              await parseApiError(response)
+            );
+          }
+
+          successCount++;
+        } catch (uploadError) {
+          console.error(
+            `Upload failed for ${uploadFile.name}:`,
+            uploadError
+          );
+
+          failedCount++;
+        }
       }
 
-      showToast(
-        "success",
-        `${uploadedCount} file${
-          uploadedCount > 1
-            ? "s"
-            : ""
-        } uploaded successfully.`
-      );
+      setSelectedUploadFiles([]);
+      setShowUploadModal(false);
 
-      setShowUpload(false);
+      await loadFiles(currentFolderId);
 
-      await loadFiles(true);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Upload failed.";
-
-      showToast(
-        "error",
-        message
-      );
+      if (successCount > 0 && failedCount === 0) {
+        showToast(
+          "success",
+          successCount === 1
+            ? "File uploaded successfully."
+            : `${successCount} files uploaded successfully.`
+        );
+      } else if (
+        successCount > 0 &&
+        failedCount > 0
+      ) {
+        showToast(
+          "error",
+          `${successCount} uploaded, ${failedCount} failed.`
+        );
+      } else {
+        showToast(
+          "error",
+          "File upload failed."
+        );
+      }
     } finally {
       setUploading(false);
-      setUploadProgress(0);
-
-      if (
-        fileInputRef.current
-      ) {
-        fileInputRef.current.value =
-          "";
-      }
     }
-  }
+  };
 
-  function handleFileUpload(
-    event: ChangeEvent<HTMLInputElement>
-  ) {
-    const selected =
-      event.target.files;
+  /* =======================================================
+     DOWNLOAD
+  ======================================================= */
 
-    if (!selected) {
+  const downloadFile = async (
+    file: FileItem,
+    event?: MouseEvent
+  ) => {
+    event?.stopPropagation();
+
+    const token = getToken();
+
+    if (!token) {
+      showToast(
+        "error",
+        "Please login again."
+      );
       return;
     }
 
-    uploadFiles(
-      Array.from(selected)
-    );
-  }
+    setDownloadingId(file.id);
 
-  function handleDrop(
-    event: DragEvent<HTMLDivElement>
-  ) {
-    event.preventDefault();
-
-    setDragActive(false);
-
-    const dropped =
-      Array.from(
-        event.dataTransfer.files
-      );
-
-    uploadFiles(dropped);
-  }
-
-  /* =========================================================
-     DOWNLOAD
-  ========================================================= */
-
-  async function downloadFile(
-    file: FileItem
-  ) {
     try {
-      setDownloadingId(
-        file.id
+      const response = await fetch(
+        `${API_BASE}/api/files/${file.id}/download`,
+        {
+          method: "GET",
+          headers: authHeaders(),
+        }
       );
 
-      const response =
-        await apiRequest(
-          `/api/files/${encodeURIComponent(
-            file.id
-          )}/download`
-        );
-
-      const blob =
-        await response.blob();
-
-      if (!blob.size) {
+      if (!response.ok) {
         throw new Error(
-          "Downloaded file is empty."
+          await parseApiError(response)
         );
       }
 
-      const url =
-        window.URL.createObjectURL(
-          blob
-        );
+      const blob = await response.blob();
+
+      const objectUrl =
+        window.URL.createObjectURL(blob);
 
       const anchor =
-        document.createElement(
-          "a"
-        );
+        document.createElement("a");
 
-      anchor.href = url;
+      anchor.href = objectUrl;
+      anchor.download = file.fileName;
 
-      anchor.download =
-        file.name;
-
-      anchor.style.display =
-        "none";
-
-      document.body.appendChild(
-        anchor
-      );
+      document.body.appendChild(anchor);
 
       anchor.click();
 
       anchor.remove();
 
-      window.setTimeout(() => {
-        window.URL.revokeObjectURL(
-          url
-        );
-      }, 1000);
+      window.URL.revokeObjectURL(objectUrl);
 
       showToast(
         "success",
         "Download started."
       );
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Download failed.";
+    } catch (err: any) {
+      console.error(
+        "Download error:",
+        err
+      );
 
       showToast(
         "error",
-        message
+        err?.message ||
+          "Unable to download file."
       );
     } finally {
       setDownloadingId(null);
     }
-  }
+  };
 
-  /* =========================================================
+  /* =======================================================
      DELETE
-  ========================================================= */
+  ======================================================= */
 
-  async function deleteFile(
-    file: FileItem
-  ) {
+  const deleteFile = async (
+    file: FileItem,
+    event?: MouseEvent
+  ) => {
+    event?.stopPropagation();
+
     const confirmed =
       window.confirm(
-        `Delete "${file.name}"?\n\nThis action cannot be undone.`
+        `Delete "${file.fileName}" permanently?`
       );
 
-    if (!confirmed) {
+    if (!confirmed) return;
+
+    const token = getToken();
+
+    if (!token) {
+      showToast(
+        "error",
+        "Please login again."
+      );
       return;
     }
 
-    try {
-      setDeletingId(file.id);
+    setDeletingId(file.id);
 
-      await apiRequest(
-        `/api/files/${encodeURIComponent(
-          file.id
-        )}`,
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/files/${file.id}`,
         {
           method: "DELETE",
+          headers: authHeaders(),
         }
       );
 
-      setFiles(
-        (current) =>
-          current.filter(
-            (item) =>
-              item.id !==
-              file.id
-          )
+      if (!response.ok) {
+        throw new Error(
+          await parseApiError(response)
+        );
+      }
+
+      setFiles((previous) =>
+        previous.filter(
+          (item) => item.id !== file.id
+        )
       );
 
       setSelectedFile(null);
 
       showToast(
         "success",
-        "File deleted successfully."
+        "File deleted permanently."
       );
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to delete file.";
+    } catch (err: any) {
+      console.error(
+        "Delete error:",
+        err
+      );
 
       showToast(
         "error",
-        message
+        err?.message ||
+          "Unable to delete file."
       );
     } finally {
       setDeletingId(null);
     }
-  }
+  };
 
-  /* =========================================================
-     KEYBOARD
-  ========================================================= */
+  /* =======================================================
+     PREVIEW
+  ======================================================= */
 
-  useEffect(() => {
-    function handleKeyDown(
-      event: globalThis.KeyboardEvent
-    ) {
-      if (
-        event.key === "Escape"
-      ) {
-        if (!uploading) {
-          setShowUpload(false);
-        }
+  const openPreview = (
+    file: FileItem,
+    event?: MouseEvent
+  ) => {
+    event?.stopPropagation();
 
-        setSelectedFile(null);
-      }
+    if (!isPreviewable(file)) {
+      setSelectedFile(file);
+      return;
     }
 
-    window.addEventListener(
-      "keydown",
-      handleKeyDown
+    setPreviewFile(file);
+  };
+
+  /* =======================================================
+     FILTER + SORT
+  ======================================================= */
+
+  const filteredFolders = useMemo(() => {
+    const query =
+      search.trim().toLowerCase();
+
+    let result = [...folders];
+
+    if (query) {
+      result = result.filter((folder) =>
+        folder.name
+          .toLowerCase()
+          .includes(query)
+      );
+    }
+
+    result.sort((a, b) =>
+      a.name.localeCompare(b.name)
     );
 
-    return () =>
-      window.removeEventListener(
-        "keydown",
-        handleKeyDown
-      );
-  }, [uploading]);
+    return result;
+  }, [folders, search]);
 
-  /* =========================================================
-     UI
-  ========================================================= */
+  const filteredFiles = useMemo(() => {
+    const query =
+      search.trim().toLowerCase();
+
+    let result = [...files];
+
+    if (query) {
+      result = result.filter((file) =>
+        file.fileName
+          .toLowerCase()
+          .includes(query)
+      );
+    }
+
+    result.sort((a, b) => {
+      let comparison = 0;
+
+      if (sortKey === "name") {
+        comparison =
+          a.fileName.localeCompare(
+            b.fileName
+          );
+      }
+
+      if (sortKey === "size") {
+        comparison =
+          a.fileSize - b.fileSize;
+      }
+
+      if (sortKey === "date") {
+        comparison =
+          new Date(
+            a.createdAt
+          ).getTime() -
+          new Date(
+            b.createdAt
+          ).getTime();
+      }
+
+      return sortDirection === "asc"
+        ? comparison
+        : -comparison;
+    });
+
+    return result;
+  }, [
+    files,
+    search,
+    sortKey,
+    sortDirection,
+  ]);
+
+  /* =======================================================
+     SORT
+  ======================================================= */
+
+  const changeSort = (
+    key: SortKey
+  ) => {
+    if (sortKey === key) {
+      setSortDirection((previous) =>
+        previous === "asc"
+          ? "desc"
+          : "asc"
+      );
+      return;
+    }
+
+    setSortKey(key);
+    setSortDirection(
+      key === "name"
+        ? "asc"
+        : "desc"
+    );
+  };
+
+  /* =======================================================
+     REFRESH
+  ======================================================= */
+
+  const handleRefresh = async () => {
+    await refreshCurrentFolder();
+
+    showToast(
+      "success",
+      "Files refreshed."
+    );
+  };
+
+  /* =======================================================
+     RENDER
+  ======================================================= */
 
   return (
     <DashboardShell>
-      <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-
+      <div className="min-h-full bg-slate-50 dark:bg-slate-950">
         {/* =================================================
             HEADER
         ================================================= */}
 
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+          <div className="px-5 py-5 sm:px-8">
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+              <div>
+                <div className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">
+                  {breadcrumbs.map(
+                    (item, index) => (
+                      <div
+                        key={`${item.id}-${index}`}
+                        className="flex items-center"
+                      >
+                        {index > 0 && (
+                          <ChevronRight
+                            size={15}
+                            className="mx-1"
+                          />
+                        )}
 
-          <div>
-            <div className="mb-4 flex items-center gap-2">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-500/10">
-                <HardDrive className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              </div>
-
-              <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                Cloud Storage
-              </span>
-            </div>
-
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-4xl">
-              My Files
-            </h1>
-
-            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-              Securely store, manage and
-              access your files from one
-              place.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() =>
-                setShowUpload(true)
-              }
-              disabled={uploading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {uploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="h-4 w-4" />
-              )}
-
-              {uploading
-                ? "Uploading..."
-                : "Upload files"}
-            </button>
-          </div>
-        </div>
-
-        {/* =================================================
-            STORAGE CARD
-        ================================================= */}
-
-        <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-
-          <div className="p-5 sm:p-6">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-
-              <div className="flex items-center gap-4">
-
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-500/10">
-                  <HardDrive className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                        <button
+                          onClick={() =>
+                            navigateBreadcrumb(
+                              index
+                            )
+                          }
+                          className={`rounded-md px-1.5 py-1 transition ${
+                            index ===
+                            breadcrumbs.length -
+                              1
+                              ? "font-medium text-slate-900 dark:text-white"
+                              : "hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-900 dark:hover:text-white"
+                          }`}
+                        >
+                          {item.name}
+                        </button>
+                      </div>
+                    )
+                  )}
                 </div>
 
-                <div>
-                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                    Storage
-                  </p>
+                <div className="mt-2 flex items-center gap-3">
+                  <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+                    {breadcrumbs[
+                      breadcrumbs.length - 1
+                    ]?.name || "My Files"}
+                  </h1>
 
-                  <p className="mt-1 text-xs text-slate-400">
-                    {formatBytes(
-                      usedBytes
-                    )}{" "}
-                    used of 10 GB
-                  </p>
-                </div>
-              </div>
-
-              <div className="w-full lg:max-w-xl">
-
-                <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="text-slate-400">
-                    {storagePercentage.toFixed(
-                      1
-                    )}
-                    % used
-                  </span>
-
-                  <span className="font-medium text-slate-600 dark:text-slate-300">
-                    {formatBytes(
-                      freeBytes
-                    )}{" "}
-                    free
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-400">
+                    {files.length}{" "}
+                    {files.length === 1
+                      ? "file"
+                      : "files"}
                   </span>
                 </div>
 
-                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
-                  <div
-                    className="h-full rounded-full bg-blue-600 transition-all duration-500"
-                    style={{
-                      width: `${storagePercentage}%`,
-                    }}
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Manage your files and folders
+                  securely.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleRefresh}
+                  disabled={loading}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <RefreshCw
+                    size={17}
+                    className={
+                      loading
+                        ? "animate-spin"
+                        : ""
+                    }
                   />
-                </div>
+                  Refresh
+                </button>
 
+                <button
+                  onClick={() =>
+                    setShowFolderModal(
+                      true
+                    )
+                  }
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <FolderPlus size={17} />
+                  New folder
+                </button>
+
+                <button
+                  onClick={() =>
+                    setShowUploadModal(
+                      true
+                    )
+                  }
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                >
+                  <Upload size={17} />
+                  Upload
+                </button>
               </div>
-
             </div>
           </div>
         </div>
@@ -911,196 +1431,173 @@ export default function FilesPage() {
             TOOLBAR
         ================================================= */}
 
-        <div className="mt-7 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+        <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+          <div className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between sm:px-8">
+            <div className="relative w-full lg:max-w-md">
+              <Search
+                size={18}
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+              />
 
-          <div className="relative w-full xl:max-w-xl">
-
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-
-            <input
-              type="search"
-              value={search}
-              onChange={(event) =>
-                setSearch(
-                  event.target.value
-                )
-              }
-              placeholder="Search your files..."
-              aria-label="Search files"
-              className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-11 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
-            />
-
-            {search && (
-              <button
-                type="button"
-                onClick={() =>
-                  setSearch("")
-                }
-                aria-label="Clear search"
-                className="absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-
-            {/* SORT */}
-
-            <div className="relative">
-
-              <select
-                value={sortBy}
+              <input
+                value={search}
                 onChange={(event) =>
-                  setSortBy(
-                    event.target.value as
-                      | "recent"
-                      | "name"
-                      | "size"
+                  setSearch(
+                    event.target.value
                   )
                 }
-                className="h-11 appearance-none rounded-xl border border-slate-200 bg-white px-4 pr-10 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
-                aria-label="Sort files"
-              >
-                <option value="recent">
-                  Recently modified
-                </option>
+                placeholder="Search files and folders..."
+                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-200 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:border-slate-700 dark:focus:bg-slate-900 dark:focus:ring-slate-800"
+              />
 
-                <option value="name">
-                  Name
-                </option>
-
-                <option value="size">
-                  Largest first
-                </option>
-              </select>
-
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              {search && (
+                <button
+                  onClick={() =>
+                    setSearch("")
+                  }
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
 
-            {/* REFRESH */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
+                <button
+                  onClick={() =>
+                    changeSort("name")
+                  }
+                  className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${
+                    sortKey === "name"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  }`}
+                >
+                  <ArrowDownAZ
+                    size={15}
+                  />
+                  Name
+                  {sortKey ===
+                    "name" && (
+                    sortDirection ===
+                    "asc" ? (
+                      " ↑"
+                    ) : (
+                      " ↓"
+                    )
+                  )}
+                </button>
 
-            <button
-              type="button"
-              onClick={() =>
-                loadFiles(true)
-              }
-              disabled={
-                refreshing ||
-                loading
-              }
-              title="Refresh files"
-              aria-label="Refresh files"
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
-            >
-              <RefreshIcon
-                refreshing={
-                  refreshing
-                }
-              />
-            </button>
+                <button
+                  onClick={() =>
+                    changeSort("size")
+                  }
+                  className={`hidden h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:flex ${
+                    sortKey === "size"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  }`}
+                >
+                  Size
+                  {sortKey ===
+                    "size" && (
+                    sortDirection ===
+                    "asc" ? (
+                      " ↑"
+                    ) : (
+                      " ↓"
+                    )
+                  )}
+                </button>
 
-            {/* VIEW */}
+                <button
+                  onClick={() =>
+                    changeSort("date")
+                  }
+                  className={`h-8 rounded-lg px-2.5 text-xs font-medium ${
+                    sortKey === "date"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  }`}
+                >
+                  Date
+                  {sortKey ===
+                    "date" && (
+                    sortDirection ===
+                    "asc" ? (
+                      " ↑"
+                    ) : (
+                      " ↓"
+                    )
+                  )}
+                </button>
+              </div>
 
-            <div className="flex h-11 rounded-xl border border-slate-200 bg-white p-1 dark:border-white/10 dark:bg-white/5">
+              <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
+                <button
+                  onClick={() =>
+                    setViewMode("grid")
+                  }
+                  title="Grid view"
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                    viewMode === "grid"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <Grid2X2
+                    size={17}
+                  />
+                </button>
 
-              <button
-                type="button"
-                onClick={() =>
-                  setView("grid")
-                }
-                aria-label="Grid view"
-                aria-pressed={
-                  view === "grid"
-                }
-                className={`flex w-10 items-center justify-center rounded-lg transition ${
-                  view === "grid"
-                    ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
-                    : "text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                }`}
-              >
-                <Grid2X2 className="h-4 w-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setView("list")
-                }
-                aria-label="List view"
-                aria-pressed={
-                  view === "list"
-                }
-                className={`flex w-10 items-center justify-center rounded-lg transition ${
-                  view === "list"
-                    ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
-                    : "text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                }`}
-              >
-                <List className="h-4 w-4" />
-              </button>
-
+                <button
+                  onClick={() =>
+                    setViewMode("list")
+                  }
+                  title="List view"
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg ${
+                    viewMode === "list"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <List size={18} />
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
         {/* =================================================
-            BREADCRUMB
+            ERROR
         ================================================= */}
 
-        <div className="mt-7 flex items-center gap-2 text-sm">
+        {error && (
+          <div className="px-5 pt-5 sm:px-8">
+            <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              <AlertCircle
+                size={19}
+                className="mt-0.5 shrink-0"
+              />
 
-          <FolderOpen className="h-4 w-4 text-blue-500" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">
+                  Unable to load files
+                </p>
 
-          <span className="font-semibold text-slate-900 dark:text-white">
-            My Files
-          </span>
+                <p className="mt-1 text-sm opacity-90">
+                  {error}
+                </p>
+              </div>
 
-          <span className="text-slate-300 dark:text-slate-700">
-            /
-          </span>
-
-          <span className="text-slate-400">
-            All Files
-          </span>
-
-        </div>
-
-        {/* =================================================
-            RESULT COUNT
-        ================================================= */}
-
-        {!loading && (
-          <div className="mt-4 flex items-center justify-between">
-
-            <p className="text-xs text-slate-400">
-              {search
-                ? `${filteredFiles.length} result${
-                    filteredFiles.length !==
-                    1
-                      ? "s"
-                      : ""
-                  }`
-                : `${files.length} file${
-                    files.length !== 1
-                      ? "s"
-                      : ""
-                  }`}
-            </p>
-
-            {search && (
               <button
-                type="button"
-                onClick={() =>
-                  setSearch("")
-                }
-                className="text-xs font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400"
+                onClick={refreshCurrentFolder}
+                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold hover:bg-red-100 dark:border-red-900 dark:hover:bg-red-950"
               >
-                Clear search
+                Retry
               </button>
-            )}
-
+            </div>
           </div>
         )}
 
@@ -1108,143 +1605,453 @@ export default function FilesPage() {
             CONTENT
         ================================================= */}
 
-        {loading ? (
-          <LoadingState
-            view={view}
-          />
-        ) : filteredFiles.length ===
-          0 ? (
-          <EmptyState
-            search={search}
-            onUpload={() =>
-              setShowUpload(true)
-            }
-          />
-        ) : view === "grid" ? (
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {filteredFiles.map(
-              (file) => (
-                <FileCard
-                  key={file.id}
-                  file={file}
-                  onClick={() =>
-                    setSelectedFile(
-                      file
-                    )
-                  }
-                  onDownload={() =>
-                    downloadFile(
-                      file
-                    )
-                  }
-                  onDelete={() =>
-                    deleteFile(file)
-                  }
-                  downloading={
-                    downloadingId ===
-                    file.id
-                  }
-                  deleting={
-                    deletingId ===
-                    file.id
-                  }
-                />
-              )
-            )}
-          </div>
-        ) : (
-          <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+        <div className="px-5 py-6 sm:px-8">
+          {loading ? (
+            <LoadingState />
+          ) : filteredFolders.length === 0 &&
+            filteredFiles.length === 0 ? (
+            <EmptyState
+              hasSearch={Boolean(
+                search.trim()
+              )}
+              onUpload={() =>
+                setShowUploadModal(true)
+              }
+              onCreateFolder={() =>
+                setShowFolderModal(true)
+              }
+            />
+          ) : (
+            <>
+              {/* FOLDERS */}
 
-            <div className="hidden grid-cols-[minmax(0,1fr)_140px_180px_80px] gap-4 border-b border-slate-200 px-5 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:border-white/10 md:grid">
-              <span>Name</span>
-              <span>Size</span>
-              <span>Modified</span>
-              <span />
-            </div>
+              {filteredFolders.length >
+                0 && (
+                <section className="mb-8">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Folders
+                    </h2>
 
-            {filteredFiles.map(
-              (file) => (
-                <ListFile
-                  key={file.id}
-                  file={file}
-                  onClick={() =>
-                    setSelectedFile(
-                      file
-                    )
-                  }
-                  onDownload={() =>
-                    downloadFile(
-                      file
-                    )
-                  }
-                  onDelete={() =>
-                    deleteFile(file)
-                  }
-                  downloading={
-                    downloadingId ===
-                    file.id
-                  }
-                  deleting={
-                    deletingId ===
-                    file.id
-                  }
-                />
-              )
-            )}
-          </div>
-        )}
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {
+                        filteredFolders.length
+                      }{" "}
+                      folders
+                    </span>
+                  </div>
+
+                  <div
+                    className={
+                      viewMode ===
+                      "grid"
+                        ? "grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
+                        : "space-y-2"
+                    }
+                  >
+                    {filteredFolders.map(
+                      (folder) =>
+                        viewMode ===
+                        "grid" ? (
+                          <FolderCard
+                            key={
+                              folder.id
+                            }
+                            folder={
+                              folder
+                            }
+                            onOpen={
+                              openFolder
+                            }
+                          />
+                        ) : (
+                          <FolderListItem
+                            key={
+                              folder.id
+                            }
+                            folder={
+                              folder
+                            }
+                            onOpen={
+                              openFolder
+                            }
+                          />
+                        )
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {/* FILES */}
+
+              {filteredFiles.length >
+                0 && (
+                <section>
+                  <div className="mb-3 flex items-center justify-between">
+                    <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Files
+                    </h2>
+
+                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                      {
+                        filteredFiles.length
+                      }{" "}
+                      files
+                    </span>
+                  </div>
+
+                  {viewMode ===
+                  "grid" ? (
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                      {filteredFiles.map(
+                        (file) => (
+                          <FileCard
+                            key={file.id}
+                            file={file}
+                            onPreview={
+                              openPreview
+                            }
+                            onDownload={
+                              downloadFile
+                            }
+                            onDelete={
+                              deleteFile
+                            }
+                            downloading={
+                              downloadingId ===
+                              file.id
+                            }
+                            deleting={
+                              deletingId ===
+                              file.id
+                            }
+                          />
+                        )
+                      )}
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                      <div className="hidden grid-cols-[minmax(0,1fr)_140px_160px_100px] gap-4 border-b border-slate-200 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800 md:grid">
+                        <span>Name</span>
+                        <span>Size</span>
+                        <span>Modified</span>
+                        <span />
+                      </div>
+
+                      {filteredFiles.map(
+                        (file) => (
+                          <FileListItem
+                            key={file.id}
+                            file={file}
+                            onPreview={
+                              openPreview
+                            }
+                            onDownload={
+                              downloadFile
+                            }
+                            onDelete={
+                              deleteFile
+                            }
+                            downloading={
+                              downloadingId ===
+                              file.id
+                            }
+                            deleting={
+                              deletingId ===
+                              file.id
+                            }
+                          />
+                        )
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      {/* =====================================================
+      {/* ===================================================
           UPLOAD MODAL
-      ===================================================== */}
+      =================================================== */}
 
-      {showUpload && (
-        <UploadModal
-          inputRef={
-            fileInputRef
-          }
-          uploading={
-            uploading
-          }
-          progress={
-            uploadProgress
-          }
-          dragActive={
-            dragActive
-          }
+      {showUploadModal && (
+        <Modal
+          title="Upload files"
           onClose={() => {
             if (!uploading) {
-              setShowUpload(
+              setShowUploadModal(
                 false
               );
             }
           }}
-          onUpload={
-            handleFileUpload
-          }
-          onDragEnter={() =>
-            setDragActive(true)
-          }
-          onDragLeave={() =>
-            setDragActive(false)
-          }
-          onDragOver={(event) =>
-            event.preventDefault()
-          }
-          onDrop={handleDrop}
-        />
+        >
+          <div className="space-y-5">
+            <div
+              onDragOver={
+                handleDragOver
+              }
+              onDragLeave={
+                handleDragLeave
+              }
+              onDrop={handleDrop}
+              onClick={() =>
+                fileInputRef.current?.click()
+              }
+              className={`cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition ${
+                isDragging
+                  ? "border-slate-900 bg-slate-50 dark:border-white dark:bg-slate-900"
+                  : "border-slate-300 hover:border-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:hover:border-slate-500 dark:hover:bg-slate-900"
+              }`}
+            >
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                <Upload
+                  size={25}
+                />
+              </div>
+
+              <p className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">
+                Drop files here
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                or click to browse from your
+                computer
+              </p>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={
+                  handleFileInput
+                }
+              />
+            </div>
+
+            {selectedUploadFiles.length >
+              0 && (
+              <div className="max-h-64 space-y-2 overflow-y-auto">
+                {selectedUploadFiles.map(
+                  (file, index) => (
+                    <div
+                      key={`${file.name}-${file.lastModified}-${index}`}
+                      className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800"
+                    >
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        <FileIcon
+                          size={19}
+                        />
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                          {file.name}
+                        </p>
+
+                        <p className="text-xs text-slate-500">
+                          {formatFileSize(
+                            file.size
+                          )}
+                        </p>
+                      </div>
+
+                      <button
+                        disabled={
+                          uploading
+                        }
+                        onClick={() =>
+                          removeUploadFile(
+                            index
+                          )
+                        }
+                        className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-red-500 disabled:opacity-50 dark:hover:bg-slate-800"
+                      >
+                        <X size={17} />
+                      </button>
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <button
+                disabled={uploading}
+                onClick={() => {
+                  setSelectedUploadFiles(
+                    []
+                  );
+                  setShowUploadModal(
+                    false
+                  );
+                }}
+                className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+
+              <button
+                disabled={
+                  uploading ||
+                  selectedUploadFiles.length ===
+                    0
+                }
+                onClick={uploadFiles}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+              >
+                {uploading && (
+                  <Loader2
+                    size={17}
+                    className="animate-spin"
+                  />
+                )}
+
+                {uploading
+                  ? "Uploading..."
+                  : `Upload ${
+                      selectedUploadFiles.length ||
+                      ""
+                    }${
+                      selectedUploadFiles.length >
+                      1
+                        ? " files"
+                        : selectedUploadFiles.length ===
+                          1
+                        ? " file"
+                        : ""
+                    }`}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
-      {/* =====================================================
+      {/* ===================================================
+          NEW FOLDER MODAL
+      =================================================== */}
+
+      {showFolderModal && (
+        <Modal
+          title="Create new folder"
+          onClose={() => {
+            if (!creatingFolder) {
+              setShowFolderModal(
+                false
+              );
+              setFolderName("");
+            }
+          }}
+        >
+          <div className="space-y-5">
+            <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-4 dark:bg-slate-900">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
+                <FolderPlus
+                  size={21}
+                />
+              </div>
+
+              <div>
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                  New folder
+                </p>
+
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Create a folder inside{" "}
+                  <span className="font-medium">
+                    {breadcrumbs[
+                      breadcrumbs.length -
+                        1
+                    ]?.name ||
+                      "My Files"}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+                Folder name
+              </label>
+
+              <input
+                autoFocus
+                value={folderName}
+                onChange={(event) =>
+                  setFolderName(
+                    event.target.value
+                  )
+                }
+                onKeyDown={(event) => {
+                  if (
+                    event.key ===
+                    "Enter"
+                  ) {
+                    createFolder();
+                  }
+                }}
+                placeholder="e.g. Projects"
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200 dark:border-slate-800 dark:bg-slate-950 dark:text-white dark:focus:border-slate-700 dark:focus:ring-slate-800"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <button
+                disabled={
+                  creatingFolder
+                }
+                onClick={() => {
+                  setShowFolderModal(
+                    false
+                  );
+                  setFolderName("");
+                }}
+                className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+
+              <button
+                disabled={
+                  creatingFolder ||
+                  !folderName.trim()
+                }
+                onClick={
+                  createFolder
+                }
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+              >
+                {creatingFolder && (
+                  <Loader2
+                    size={17}
+                    className="animate-spin"
+                  />
+                )}
+
+                {creatingFolder
+                  ? "Creating..."
+                  : "Create folder"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ===================================================
           DETAILS MODAL
-      ===================================================== */}
+      =================================================== */}
 
       {selectedFile && (
         <FileDetailsModal
-          file={
-            selectedFile
+          file={selectedFile}
+          onClose={() =>
+            setSelectedFile(null)
           }
+          onPreview={openPreview}
+          onDownload={downloadFile}
+          onDelete={deleteFile}
           downloading={
             downloadingId ===
             selectedFile.id
@@ -1253,65 +2060,195 @@ export default function FilesPage() {
             deletingId ===
             selectedFile.id
           }
+        />
+      )}
+
+      {/* ===================================================
+          PREVIEW MODAL
+      =================================================== */}
+
+      {previewFile && (
+        <PreviewModal
+          file={previewFile}
           onClose={() =>
-            setSelectedFile(null)
+            setPreviewFile(null)
           }
-          onDownload={() =>
-            downloadFile(
-              selectedFile
-            )
+          onDownload={
+            downloadFile
           }
-          onDelete={() =>
-            deleteFile(
-              selectedFile
-            )
+          downloading={
+            downloadingId ===
+            previewFile.id
           }
         />
       )}
 
-      {/* =====================================================
+      {/* ===================================================
           TOAST
-      ===================================================== */}
+      =================================================== */}
 
       {toast && (
-        <Toast
-          toast={toast}
-          onClose={() =>
-            setToast(null)
-          }
-        />
+        <div className="fixed bottom-5 right-5 z-[100] max-w-sm">
+          <div
+            className={`flex items-start gap-3 rounded-2xl border px-4 py-3 shadow-xl ${
+              toast.type ===
+              "success"
+                ? "border-emerald-200 bg-white text-slate-800 dark:border-emerald-900 dark:bg-slate-900 dark:text-white"
+                : "border-red-200 bg-white text-red-700 dark:border-red-900 dark:bg-slate-900 dark:text-red-300"
+            }`}
+          >
+            {toast.type ===
+            "success" ? (
+              <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                ✓
+              </div>
+            ) : (
+              <AlertCircle
+                size={19}
+                className="mt-0.5"
+              />
+            )}
+
+            <p className="text-sm font-medium">
+              {toast.message}
+            </p>
+
+            <button
+              onClick={() =>
+                setToast(null)
+              }
+              className="ml-2 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
       )}
     </DashboardShell>
   );
 }
 
 /* =========================================================
-   REFRESH ICON
+   MODAL
 ========================================================= */
 
-function RefreshIcon({
-  refreshing,
+function Modal({
+  title,
+  children,
+  onClose,
 }: {
-  refreshing: boolean;
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
 }) {
   return (
-    <svg
-      className={`h-4 w-4 ${
-        refreshing
-          ? "animate-spin"
-          : ""
-      }`}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+        <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-950">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+            {title}
+          </h2>
+
+          <button
+            onClick={onClose}
+            className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-900 dark:hover:text-white"
+          >
+            <X size={19} />
+          </button>
+        </div>
+
+        <div className="p-5">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   FOLDER CARD
+========================================================= */
+
+function FolderCard({
+  folder,
+  onOpen,
+}: {
+  folder: FolderItem;
+  onOpen: (folder: FolderItem) => void;
+}) {
+  return (
+    <button
+      onDoubleClick={() =>
+        onOpen(folder)
+      }
+      onClick={() =>
+        onOpen(folder)
+      }
+      className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
     >
-      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-      <path d="M21 3v6h-6" />
-    </svg>
+      <div className="flex items-start justify-between">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <FolderOpen
+            size={25}
+          />
+        </div>
+
+        <MoreHorizontal
+          size={18}
+          className="text-slate-300 dark:text-slate-600"
+        />
+      </div>
+
+      <div className="mt-4">
+        <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+          {folder.name}
+        </p>
+
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Folder
+        </p>
+      </div>
+    </button>
+  );
+}
+
+/* =========================================================
+   FOLDER LIST
+========================================================= */
+
+function FolderListItem({
+  folder,
+  onOpen,
+}: {
+  folder: FolderItem;
+  onOpen: (folder: FolderItem) => void;
+}) {
+  return (
+    <button
+      onClick={() =>
+        onOpen(folder)
+      }
+      className="flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/70"
+    >
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+        <Folder size={21} />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+          {folder.name}
+        </p>
+
+        <p className="text-xs text-slate-500">
+          Folder
+        </p>
+      </div>
+
+      <ChevronRight
+        size={18}
+        className="text-slate-400"
+      />
+    </button>
   );
 }
 
@@ -1321,505 +2258,277 @@ function RefreshIcon({
 
 function FileCard({
   file,
-  onClick,
+  onPreview,
   onDownload,
   onDelete,
   downloading,
   deleting,
 }: {
   file: FileItem;
-  onClick: () => void;
-  onDownload: () => void;
-  onDelete: () => void;
+  onPreview: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
+  onDownload: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
+  onDelete: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
   downloading: boolean;
   deleting: boolean;
 }) {
-  const busy =
-    downloading ||
-    deleting;
+  const category =
+    getFileCategory(file);
 
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-slate-200/50 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/30 dark:hover:shadow-black/20">
-
-      <div className="flex items-start justify-between">
-
-        <button
-          type="button"
-          onClick={onClick}
-          aria-label={`Open ${file.name}`}
-          className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition group-hover:bg-blue-50 group-hover:text-blue-600 dark:bg-white/10 dark:text-slate-300 dark:group-hover:bg-blue-500/10 dark:group-hover:text-blue-400"
-        >
-          <FileIcon
-            type={file.type}
-          />
-        </button>
-
-        <button
-          type="button"
-          onClick={onClick}
-          aria-label={`More options for ${file.name}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
-        >
-          <MoreHorizontal className="h-5 w-5" />
-        </button>
-      </div>
-
+    <div className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
       <button
-        type="button"
-        onClick={onClick}
-        className="mt-5 block w-full text-left"
+        onClick={(event) =>
+          onPreview(
+            file,
+            event
+          )
+        }
+        className="block w-full text-left"
       >
-        <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
-          {file.name}
-        </p>
-
-        <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
-
-          <span>
-            {formatBytes(
-              file.size
+        <div className="flex h-40 items-center justify-center bg-slate-50 dark:bg-slate-950">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-slate-600 shadow-sm dark:bg-slate-900 dark:text-slate-300">
+            {getFileIcon(
+              file,
+              30
             )}
-          </span>
-
-          <span className="text-slate-300 dark:text-slate-700">
-            •
-          </span>
-
-          <span>
-            {file.modified}
-          </span>
-
+          </div>
         </div>
       </button>
 
-      <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3 dark:border-white/5">
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <button
+              onClick={(event) =>
+                onPreview(
+                  file,
+                  event
+                )
+              }
+              className="block w-full truncate text-left text-sm font-semibold text-slate-900 hover:underline dark:text-white"
+              title={
+                file.fileName
+              }
+            >
+              {file.fileName}
+            </button>
 
-        <button
-          type="button"
-          onClick={onDownload}
-          disabled={busy}
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-blue-400"
-        >
-          {downloading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Download className="h-3.5 w-3.5" />
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {formatFileSize(
+                file.fileSize
+              )}{" "}
+              •{" "}
+              {formatDate(
+                file.createdAt
+              )}
+            </p>
+          </div>
+
+          <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-1 text-[10px] font-bold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+            {category}
+          </span>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+          {isPreviewable(
+            file
+          ) && (
+            <button
+              onClick={(event) =>
+                onPreview(
+                  file,
+                  event
+                )
+              }
+              className="flex-1 rounded-lg px-2 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Preview
+            </button>
           )}
 
-          Download
-        </button>
+          <button
+            disabled={downloading}
+            onClick={(event) =>
+              onDownload(
+                file,
+                event
+              )
+            }
+            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+            title="Download"
+          >
+            {downloading ? (
+              <Loader2
+                size={17}
+                className="animate-spin"
+              />
+            ) : (
+              <Download
+                size={17}
+              />
+            )}
+          </button>
 
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={busy}
-          aria-label={`Delete ${file.name}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-        >
-          {deleting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Trash2 className="h-3.5 w-3.5" />
-          )}
-        </button>
-
+          <button
+            disabled={deleting}
+            onClick={(event) =>
+              onDelete(
+                file,
+                event
+              )
+            }
+            className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+            title="Delete permanently"
+          >
+            {deleting ? (
+              <Loader2
+                size={17}
+                className="animate-spin"
+              />
+            ) : (
+              <Trash2
+                size={17}
+              />
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 /* =========================================================
-   LIST FILE
+   FILE LIST
 ========================================================= */
 
-function ListFile({
+function FileListItem({
   file,
-  onClick,
+  onPreview,
   onDownload,
   onDelete,
   downloading,
   deleting,
 }: {
   file: FileItem;
-  onClick: () => void;
-  onDownload: () => void;
-  onDelete: () => void;
+  onPreview: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
+  onDownload: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
+  onDelete: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
   downloading: boolean;
   deleting: boolean;
 }) {
-  const busy =
-    downloading ||
-    deleting;
-
   return (
-    <div className="group grid w-full gap-3 border-b border-slate-100 px-4 py-4 transition last:border-0 hover:bg-slate-50 sm:px-5 dark:border-white/5 dark:hover:bg-white/5 md:grid-cols-[minmax(0,1fr)_140px_180px_80px] md:items-center md:gap-4">
-
+    <div className="grid grid-cols-1 gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40 md:grid-cols-[minmax(0,1fr)_140px_160px_100px] md:items-center md:gap-4 md:px-5">
       <button
-        type="button"
-        onClick={onClick}
+        onClick={(event) =>
+          onPreview(
+            file,
+            event
+          )
+        }
         className="flex min-w-0 items-center gap-3 text-left"
       >
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
-          <FileIcon
-            type={file.type}
-          />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          {getFileIcon(
+            file,
+            20
+          )}
         </div>
 
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
-            {file.name}
+          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+            {file.fileName}
           </p>
 
-          <p className="mt-1 text-xs text-slate-400 md:hidden">
-            {formatBytes(
-              file.size
-            )}{" "}
-            • {file.modified}
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {file.fileType}
           </p>
         </div>
       </button>
 
-      <span className="hidden text-xs text-slate-400 md:block">
-        {formatBytes(
-          file.size
+      <div className="text-xs text-slate-600 dark:text-slate-300">
+        <span className="mr-2 text-slate-400 md:hidden">
+          Size:
+        </span>
+        {formatFileSize(
+          file.fileSize
         )}
-      </span>
+      </div>
 
-      <span className="hidden text-xs text-slate-400 md:block">
-        {file.modified}
-      </span>
+      <div className="text-xs text-slate-600 dark:text-slate-300">
+        <span className="mr-2 text-slate-400 md:hidden">
+          Modified:
+        </span>
+        {formatDate(
+          file.createdAt
+        )}
+      </div>
 
-      <div className="flex items-center justify-end gap-1">
-
+      <div className="flex items-center gap-1 md:justify-end">
         <button
-          type="button"
-          onClick={onDownload}
-          disabled={busy}
+          disabled={downloading}
+          onClick={(event) =>
+            onDownload(
+              file,
+              event
+            )
+          }
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
           title="Download"
-          aria-label={`Download ${file.name}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-500/10 dark:hover:text-blue-400"
         >
           {downloading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2
+              size={17}
+              className="animate-spin"
+            />
           ) : (
-            <Download className="h-4 w-4" />
+            <Download
+              size={17}
+            />
           )}
         </button>
 
         <button
-          type="button"
-          onClick={onDelete}
-          disabled={busy}
+          disabled={deleting}
+          onClick={(event) =>
+            onDelete(
+              file,
+              event
+            )
+          }
+          className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-red-950/30 dark:hover:text-red-400"
           title="Delete"
-          aria-label={`Delete ${file.name}`}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-500/10 dark:hover:text-red-400"
         >
           {deleting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-        </button>
-
-      </div>
-    </div>
-  );
-}
-
-/* =========================================================
-   FILE ICON
-========================================================= */
-
-function FileIcon({
-  type,
-}: {
-  type: FileType;
-}) {
-  if (type === "folder") {
-    return (
-      <Folder className="h-6 w-6" />
-    );
-  }
-
-  if (type === "image") {
-    return (
-      <FileImage className="h-6 w-6" />
-    );
-  }
-
-  if (
-    type === "pdf" ||
-    type === "document"
-  ) {
-    return (
-      <FileText className="h-6 w-6" />
-    );
-  }
-
-  if (type === "zip") {
-    return (
-      <Archive className="h-6 w-6" />
-    );
-  }
-
-  return (
-    <FileIconLucide className="h-6 w-6" />
-  );
-}
-
-/* =========================================================
-   EMPTY STATE
-========================================================= */
-
-function EmptyState({
-  search,
-  onUpload,
-}: {
-  search: string;
-  onUpload: () => void;
-}) {
-  return (
-    <div className="mt-6 flex min-h-[430px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-white/10 dark:bg-white/[0.03]">
-
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/10">
-
-        {search ? (
-          <Search className="h-7 w-7 text-blue-600 dark:text-blue-400" />
-        ) : (
-          <CloudUpload className="h-8 w-8 text-blue-600 dark:text-blue-400" />
-        )}
-
-      </div>
-
-      <h3 className="mt-5 text-lg font-bold text-slate-900 dark:text-white">
-        {search
-          ? "No files found"
-          : "Your storage is empty"}
-      </h3>
-
-      <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">
-        {search
-          ? "We couldn't find any files matching your search. Try a different name."
-          : "Upload your first file to start using your CloudVault storage."}
-      </p>
-
-      {!search && (
-        <button
-          type="button"
-          onClick={onUpload}
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 active:scale-[0.98]"
-        >
-          <Upload className="h-4 w-4" />
-          Upload files
-        </button>
-      )}
-
-    </div>
-  );
-}
-
-/* =========================================================
-   LOADING
-========================================================= */
-
-function LoadingState({
-  view,
-}: {
-  view: "grid" | "list";
-}) {
-  if (view === "list") {
-    return (
-      <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/[0.04]">
-
-        {Array.from({
-          length: 7,
-        }).map((_, index) => (
-          <div
-            key={index}
-            className="flex items-center gap-4 border-b border-slate-100 px-5 py-4 last:border-0 dark:border-white/5"
-          >
-            <div className="h-10 w-10 animate-pulse rounded-xl bg-slate-100 dark:bg-white/10" />
-
-            <div className="flex-1">
-              <div className="h-4 w-1/3 animate-pulse rounded bg-slate-100 dark:bg-white/10" />
-
-              <div className="mt-2 h-3 w-1/5 animate-pulse rounded bg-slate-100 dark:bg-white/10" />
-            </div>
-
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-      {Array.from({
-        length: 8,
-      }).map((_, index) => (
-        <div
-          key={index}
-          className="h-[190px] animate-pulse rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/[0.04]"
-        />
-      ))}
-    </div>
-  );
-}
-
-/* =========================================================
-   UPLOAD MODAL
-========================================================= */
-
-function UploadModal({
-  inputRef,
-  uploading,
-  progress,
-  dragActive,
-  onClose,
-  onUpload,
-  onDragEnter,
-  onDragLeave,
-  onDragOver,
-  onDrop,
-}: {
-  inputRef: RefObject<HTMLInputElement | null>;
-  uploading: boolean;
-  progress: number;
-  dragActive: boolean;
-  onClose: () => void;
-  onUpload: (
-    event: ChangeEvent<HTMLInputElement>
-  ) => void;
-  onDragEnter: () => void;
-  onDragLeave: () => void;
-  onDragOver: (
-    event: DragEvent<HTMLDivElement>
-  ) => void;
-  onDrop: (
-    event: DragEvent<HTMLDivElement>
-  ) => void;
-}) {
-  return (
-    <Modal
-      onClose={onClose}
-      disabled={uploading}
-    >
-      <div className="text-center">
-
-        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/10">
-
-          {uploading ? (
-            <Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-400" />
-          ) : (
-            <Upload className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-          )}
-
-        </div>
-
-        <h2 className="mt-5 text-xl font-bold text-slate-900 dark:text-white">
-          {uploading
-            ? "Uploading files"
-            : "Upload files"}
-        </h2>
-
-        <p className="mt-2 text-sm text-slate-400">
-          {uploading
-            ? "Please keep this window open while your files are being uploaded."
-            : "Upload one or multiple files to your CloudVault storage."}
-        </p>
-
-        {!uploading ? (
-          <>
-            <div
-              onDragEnter={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onDragEnter();
-              }}
-              onDragLeave={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onDragLeave();
-              }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onDragOver(event);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onDrop(event);
-              }}
-              className={`mt-6 rounded-2xl border-2 border-dashed px-6 py-10 transition ${
-                dragActive
-                  ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
-                  : "border-slate-200 hover:border-blue-400 hover:bg-slate-50 dark:border-white/10 dark:hover:bg-white/5"
-              }`}
-            >
-              <CloudUpload className="mx-auto h-9 w-9 text-slate-400" />
-
-              <p className="mt-4 text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Drag & drop files here
-              </p>
-
-              <p className="mt-1 text-xs text-slate-400">
-                or choose files from your device
-              </p>
-
-              <button
-                type="button"
-                onClick={() =>
-                  inputRef.current?.click()
-                }
-                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 active:scale-[0.98]"
-              >
-                <Upload className="h-4 w-4" />
-                Choose files
-              </button>
-            </div>
-
-            <p className="mt-4 text-xs text-slate-400">
-              Maximum file size: 100 MB per file
-            </p>
-
-            <input
-              ref={inputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={onUpload}
+            <Loader2
+              size={17}
+              className="animate-spin"
             />
-          </>
-        ) : (
-          <div className="mt-7">
-
-            <div className="mb-2 flex justify-between text-xs">
-
-              <span className="font-medium text-slate-500 dark:text-slate-400">
-                Upload progress
-              </span>
-
-              <span className="font-bold text-blue-600 dark:text-blue-400">
-                {progress}%
-              </span>
-
-            </div>
-
-            <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
-              <div
-                className="h-full rounded-full bg-blue-600 transition-all duration-300"
-                style={{
-                  width: `${progress}%`,
-                }}
-              />
-            </div>
-
-          </div>
-        )}
-
+          ) : (
+            <Trash2
+              size={17}
+            />
+          )}
+        </button>
       </div>
-    </Modal>
+    </div>
   );
 }
 
@@ -1829,537 +2538,526 @@ function UploadModal({
 
 function FileDetailsModal({
   file,
-  downloading,
-  deleting,
   onClose,
+  onPreview,
   onDownload,
   onDelete,
+  downloading,
+  deleting,
 }: {
   file: FileItem;
+  onClose: () => void;
+  onPreview: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
+  onDownload: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
+  onDelete: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
   downloading: boolean;
   deleting: boolean;
-  onClose: () => void;
-  onDownload: () => void;
-  onDelete: () => void;
 }) {
-  const busy =
-    downloading ||
-    deleting;
-
   return (
     <Modal
+      title="File details"
       onClose={onClose}
-      disabled={busy}
     >
-      <div className="flex items-start gap-4 pr-8">
+      <div className="space-y-5">
+        <div className="flex items-center gap-4 rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
+            {getFileIcon(
+              file,
+              27
+            )}
+          </div>
 
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-          <FileIcon
-            type={file.type}
+          <div className="min-w-0">
+            <p
+              className="truncate text-base font-bold text-slate-900 dark:text-white"
+              title={
+                file.fileName
+              }
+            >
+              {file.fileName}
+            </p>
+
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {file.fileType}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <InfoBox
+            label="Size"
+            value={formatFileSize(
+              file.fileSize
+            )}
+          />
+
+          <InfoBox
+            label="Type"
+            value={getFileCategory(
+              file
+            ).toUpperCase()}
+          />
+
+          <InfoBox
+            label="Created"
+            value={formatDate(
+              file.createdAt
+            )}
+          />
+
+          <InfoBox
+            label="Time"
+            value={formatDateTime(
+              file.createdAt
+            )}
           />
         </div>
 
-        <div className="min-w-0">
-          <h2 className="truncate text-lg font-bold text-slate-900 dark:text-white">
-            {file.name}
-          </h2>
+        <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+          {isPreviewable(
+            file
+          ) && (
+            <button
+              onClick={() =>
+                onPreview(file)
+              }
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              Preview
+            </button>
+          )}
 
-          <p className="mt-1 text-xs capitalize text-slate-400">
-            {getReadableType(
-              file.type
+          <button
+            disabled={downloading}
+            onClick={() =>
+              onDownload(file)
+            }
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+          >
+            {downloading ? (
+              <Loader2
+                size={17}
+                className="animate-spin"
+              />
+            ) : (
+              <Download
+                size={17}
+              />
             )}
-          </p>
+            Download
+          </button>
+
+          <button
+            disabled={deleting}
+            onClick={() =>
+              onDelete(file)
+            }
+            className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
+          >
+            {deleting ? (
+              <Loader2
+                size={17}
+                className="animate-spin"
+              />
+            ) : (
+              <Trash2
+                size={17}
+              />
+            )}
+            Delete
+          </button>
         </div>
-      </div>
-
-      <div className="mt-6 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
-
-        <DetailRow
-          icon={
-            <HardDrive className="h-4 w-4" />
-          }
-          label="Size"
-          value={formatBytes(
-            file.size
-          )}
-        />
-
-        <DetailRow
-          icon={
-            <Clock3 className="h-4 w-4" />
-          }
-          label="Modified"
-          value={file.modified}
-        />
-
-        <DetailRow
-          icon={
-            <FileText className="h-4 w-4" />
-          }
-          label="Type"
-          value={
-            file.fileType ||
-            getReadableType(
-              file.type
-            )
-          }
-        />
-
-        <DetailRow
-          icon={
-            <Check className="h-4 w-4" />
-          }
-          label="Status"
-          value="Available"
-        />
-
-      </div>
-
-      <div className="mt-6">
-
-        <button
-          type="button"
-          onClick={onDownload}
-          disabled={busy}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {downloading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="h-4 w-4" />
-          )}
-
-          {downloading
-            ? "Preparing download..."
-            : "Download file"}
-        </button>
-
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={busy}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10"
-        >
-          {deleting ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Trash2 className="h-4 w-4" />
-          )}
-
-          {deleting
-            ? "Deleting..."
-            : "Delete file"}
-        </button>
-
-      </div>
-
-      <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-700 dark:border-blue-500/10 dark:bg-blue-500/5 dark:text-blue-300">
-        Sharing and folder organization
-        require corresponding backend APIs.
-        They are not simulated here.
       </div>
     </Modal>
   );
 }
 
 /* =========================================================
-   DETAIL ROW
+   INFO BOX
 ========================================================= */
 
-function DetailRow({
-  icon,
+function InfoBox({
   label,
   value,
 }: {
-  icon: ReactNode;
   label: string;
   value: string;
 }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-200 py-3 last:border-0 dark:border-white/5">
-
-      <div className="flex items-center gap-2 text-xs text-slate-400">
-        {icon}
+    <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
         {label}
-      </div>
+      </p>
 
-      <span className="max-w-[200px] truncate text-right text-xs font-semibold text-slate-700 dark:text-slate-200">
+      <p className="mt-1 truncate text-sm font-semibold text-slate-800 dark:text-slate-200">
         {value}
-      </span>
-
+      </p>
     </div>
   );
 }
 
 /* =========================================================
-   MODAL
+   PREVIEW MODAL
 ========================================================= */
 
-function Modal({
-  children,
+function PreviewModal({
+  file,
   onClose,
-  disabled = false,
+  onDownload,
+  downloading,
 }: {
-  children: ReactNode;
+  file: FileItem;
   onClose: () => void;
-  disabled?: boolean;
+  onDownload: (
+    file: FileItem,
+    event?: MouseEvent
+  ) => void;
+  downloading: boolean;
 }) {
-  function handleBackdrop(
-    event: React.MouseEvent<HTMLDivElement>
-  ) {
-    if (
-      event.target ===
-      event.currentTarget &&
-      !disabled
-    ) {
-      onClose();
-    }
-  }
+  const [previewUrl, setPreviewUrl] =
+    useState<string | null>(null);
 
-  function handleKeyDown(
-    event: ReactKeyboardEvent<HTMLDivElement>
-  ) {
-    if (
-      event.key === "Escape" &&
-      !disabled
-    ) {
-      onClose();
-    }
-  }
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null =
+      null;
+
+    const loadPreview = async () => {
+      const token = getToken();
+
+      if (!token) {
+        if (active) {
+          setError(
+            "Please login again."
+          );
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError("");
+
+        const response = await fetch(
+          `${API_BASE}/api/files/${file.id}/preview`,
+          {
+            method: "GET",
+            headers: authHeaders(),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(response)
+          );
+        }
+
+        const blob =
+          await response.blob();
+
+        objectUrl =
+          window.URL.createObjectURL(
+            blob
+          );
+
+        if (active) {
+          setPreviewUrl(
+            objectUrl
+          );
+        }
+      } catch (err: any) {
+        console.error(
+          "Preview error:",
+          err
+        );
+
+        if (active) {
+          setError(
+            err?.message ||
+              "Unable to preview this file."
+          );
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadPreview();
+
+    return () => {
+      active = false;
+
+      if (objectUrl) {
+        window.URL.revokeObjectURL(
+          objectUrl
+        );
+      }
+    };
+  }, [file.id]);
+
+  const category =
+    getFileCategory(file);
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      tabIndex={-1}
-      onMouseDown={
-        handleBackdrop
-      }
-      onKeyDown={handleKeyDown}
-      className="fixed inset-0 z-50 flex min-h-screen items-center justify-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm"
-    >
-      <div className="relative my-auto w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-slate-900">
+    <div className="fixed inset-0 z-[70] flex flex-col bg-slate-950">
+      <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 px-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white">
+            {getFileIcon(
+              file,
+              18
+            )}
+          </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            if (!disabled) {
-              onClose();
+          <div className="min-w-0">
+            <p
+              className="truncate text-sm font-semibold text-white"
+              title={
+                file.fileName
+              }
+            >
+              {file.fileName}
+            </p>
+
+            <p className="text-xs text-slate-400">
+              {formatFileSize(
+                file.fileSize
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            disabled={downloading}
+            onClick={() =>
+              onDownload(file)
             }
-          }}
-          disabled={disabled}
-          aria-label="Close dialog"
-          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10 dark:hover:text-white"
-        >
-          <X className="h-4 w-4" />
-        </button>
+            className="inline-flex items-center gap-2 rounded-xl bg-white px-3.5 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-200 disabled:opacity-50"
+          >
+            {downloading ? (
+              <Loader2
+                size={16}
+                className="animate-spin"
+              />
+            ) : (
+              <Download
+                size={16}
+              />
+            )}
+            <span className="hidden sm:inline">
+              Download
+            </span>
+          </button>
 
-        {children}
+          <button
+            onClick={onClose}
+            className="rounded-xl p-2.5 text-slate-400 hover:bg-white/10 hover:text-white"
+          >
+            <X size={20} />
+          </button>
+        </div>
+      </div>
 
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4 sm:p-8">
+        {loading ? (
+          <div className="text-center text-white">
+            <Loader2
+              size={35}
+              className="mx-auto animate-spin text-slate-400"
+            />
+
+            <p className="mt-3 text-sm text-slate-400">
+              Loading preview...
+            </p>
+          </div>
+        ) : error ? (
+          <div className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
+            <AlertCircle
+              size={30}
+              className="mx-auto text-red-400"
+            />
+
+            <p className="mt-3 text-sm font-semibold text-white">
+              Preview unavailable
+            </p>
+
+            <p className="mt-1 text-xs text-slate-400">
+              {error}
+            </p>
+          </div>
+        ) : previewUrl ? (
+          <div className="flex h-full w-full items-center justify-center">
+            {category ===
+              "image" && (
+              <img
+                src={previewUrl}
+                alt={
+                  file.fileName
+                }
+                className="max-h-full max-w-full rounded-xl object-contain shadow-2xl"
+              />
+            )}
+
+            {category ===
+              "video" && (
+              <video
+                src={previewUrl}
+                controls
+                playsInline
+                className="max-h-full max-w-full rounded-xl shadow-2xl"
+              />
+            )}
+
+            {category ===
+              "audio" && (
+              <div className="w-full max-w-xl rounded-3xl bg-white p-8 text-center shadow-2xl">
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                  <FileAudio
+                    size={36}
+                  />
+                </div>
+
+                <p className="mt-5 font-bold text-slate-900">
+                  {file.fileName}
+                </p>
+
+                <audio
+                  src={previewUrl}
+                  controls
+                  className="mt-6 w-full"
+                />
+              </div>
+            )}
+
+            {category ===
+              "pdf" && (
+              <iframe
+                src={previewUrl}
+                title={
+                  file.fileName
+                }
+                className="h-full w-full max-w-6xl rounded-xl bg-white shadow-2xl"
+              />
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
 
 /* =========================================================
-   TOAST
+   LOADING
 ========================================================= */
 
-function Toast({
-  toast,
-  onClose,
-}: {
-  toast: ToastState;
-  onClose: () => void;
-}) {
-  const success =
-    toast.type === "success";
-
+function LoadingState() {
   return (
-    <div className="fixed bottom-5 right-5 z-[60] w-[calc(100%-2rem)] max-w-sm">
-
-      <div
-        role="status"
-        className={`flex items-start gap-3 rounded-2xl border bg-white p-4 shadow-2xl dark:bg-slate-900 ${
-          success
-            ? "border-emerald-200 dark:border-emerald-500/20"
-            : "border-red-200 dark:border-red-500/20"
-        }`}
-      >
-
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      {Array.from({
+        length: 8,
+      }).map((_, index) => (
         <div
-          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-            success
-              ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400"
-              : "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
-          }`}
+          key={index}
+          className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
         >
-          {success ? (
-            <Check className="h-4 w-4" />
+          <div className="h-40 animate-pulse bg-slate-100 dark:bg-slate-800" />
+
+          <div className="space-y-3 p-4">
+            <div className="h-4 w-3/4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+
+            <div className="h-3 w-1/2 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+
+            <div className="h-8 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* =========================================================
+   EMPTY
+========================================================= */
+
+function EmptyState({
+  hasSearch,
+  onUpload,
+  onCreateFolder,
+}: {
+  hasSearch: boolean;
+  onUpload: () => void;
+  onCreateFolder: () => void;
+}) {
+  return (
+    <div className="flex min-h-[55vh] items-center justify-center">
+      <div className="max-w-md text-center">
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-white text-slate-400 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+          {hasSearch ? (
+            <Search size={31} />
           ) : (
-            <AlertCircle className="h-4 w-4" />
+            <FolderOpen
+              size={31}
+            />
           )}
         </div>
 
-        <div className="min-w-0 flex-1">
+        <h2 className="mt-5 text-lg font-bold text-slate-900 dark:text-white">
+          {hasSearch
+            ? "No matching files"
+            : "This folder is empty"}
+        </h2>
 
-          <p className="text-sm font-semibold text-slate-900 dark:text-white">
-            {success
-              ? "Success"
-              : "Something went wrong"}
-          </p>
+        <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+          {hasSearch
+            ? "Try a different search term."
+            : "Upload your first file or create a folder to get started."}
+        </p>
 
-          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
-            {toast.message}
-          </p>
+        {!hasSearch && (
+          <div className="mt-5 flex justify-center gap-2">
+            <button
+              onClick={
+                onCreateFolder
+              }
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <FolderPlus
+                size={17}
+              />
+              New folder
+            </button>
 
-        </div>
-
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close notification"
-          className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
-        >
-          <X className="h-4 w-4" />
-        </button>
-
+            <button
+              onClick={onUpload}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+            >
+              <Upload
+                size={17}
+              />
+              Upload
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
-}
-
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function getFileTypeFromName(
-  fileName: string
-): FileType {
-  const extension =
-    fileName
-      .split(".")
-      .pop()
-      ?.toLowerCase();
-
-  if (
-    extension === "pdf"
-  ) {
-    return "pdf";
-  }
-
-  if (
-    [
-      "png",
-      "jpg",
-      "jpeg",
-      "gif",
-      "webp",
-      "svg",
-      "bmp",
-      "heic",
-      "avif",
-    ].includes(
-      extension || ""
-    )
-  ) {
-    return "image";
-  }
-
-  if (
-    [
-      "zip",
-      "rar",
-      "7z",
-      "tar",
-      "gz",
-      "bz2",
-    ].includes(
-      extension || ""
-    )
-  ) {
-    return "zip";
-  }
-
-  if (
-    [
-      "doc",
-      "docx",
-      "txt",
-      "rtf",
-      "odt",
-      "xls",
-      "xlsx",
-      "csv",
-      "ppt",
-      "pptx",
-    ].includes(
-      extension || ""
-    )
-  ) {
-    return "document";
-  }
-
-  return "other";
-}
-
-function formatBytes(
-  bytes: number
-): string {
-  if (
-    !Number.isFinite(bytes) ||
-    bytes <= 0
-  ) {
-    return "0 Bytes";
-  }
-
-  const units = [
-    "Bytes",
-    "KB",
-    "MB",
-    "GB",
-    "TB",
-  ];
-
-  const index = Math.min(
-    Math.floor(
-      Math.log(bytes) /
-        Math.log(1024)
-    ),
-    units.length - 1
-  );
-
-  const value =
-    bytes /
-    Math.pow(
-      1024,
-      index
-    );
-
-  return `${value.toFixed(
-    index === 0
-      ? 0
-      : value >= 100
-      ? 0
-      : 1
-  )} ${units[index]}`;
-}
-
-function parseDate(
-  value: unknown
-): Date | null {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return null;
-  }
-
-  const date =
-    new Date(String(value));
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return null;
-  }
-
-  return date;
-}
-
-function formatModifiedDate(
-  value: unknown
-): string {
-  const date =
-    parseDate(value);
-
-  if (!date) {
-    return "Recently";
-  }
-
-  const now =
-    new Date();
-
-  const difference =
-    Math.max(
-      0,
-      now.getTime() -
-        date.getTime()
-    );
-
-  const minutes = Math.floor(
-    difference / 60000
-  );
-
-  const hours = Math.floor(
-    difference / 3600000
-  );
-
-  const days = Math.floor(
-    difference / 86400000
-  );
-
-  if (minutes < 1) {
-    return "Just now";
-  }
-
-  if (minutes < 60) {
-    return `${minutes} min${
-      minutes === 1
-        ? ""
-        : "s"
-    } ago`;
-  }
-
-  if (hours < 24) {
-    return `${hours} hr${
-      hours === 1
-        ? ""
-        : "s"
-    } ago`;
-  }
-
-  if (days === 1) {
-    return "Yesterday";
-  }
-
-  if (days < 7) {
-    return `${days} days ago`;
-  }
-
-  return date.toLocaleDateString(
-    "en-IN",
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }
-  );
-}
-
-function getReadableType(
-  type: FileType
-): string {
-  switch (type) {
-    case "pdf":
-      return "PDF document";
-
-    case "image":
-      return "Image";
-
-    case "zip":
-      return "Archive";
-
-    case "folder":
-      return "Folder";
-
-    case "document":
-      return "Document";
-
-    default:
-      return "File";
-  }
 }
