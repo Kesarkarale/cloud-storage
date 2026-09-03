@@ -9,4 +9,13 @@ import java.util.UUID;
 public interface FileRepository extends JpaRepository<File, UUID> {
 
     List<File> findByUserId(UUID userId);
+
+    List<File> findByUserIdAndParentFolderId(
+            UUID userId,
+            UUID parentFolderId
+    );
+
+    List<File> findByUserIdAndParentFolderIdIsNull(
+            UUID userId
+    );
 }
