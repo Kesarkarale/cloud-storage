@@ -1,215 +1,1174 @@
 "use client";
 
 import {
-  AlertTriangle,
+  Archive,
   Check,
-  Clock3,
+  ChevronDown,
   File,
-  FileArchive,
   FileImage,
   FileText,
-  FolderOpen,
+  Folder,
+  Grid2X2,
+  HardDrive,
+  List,
+  Loader2,
+  MoreHorizontal,
+  RefreshCw,
   RotateCcw,
   Search,
   Trash2,
   X,
-  MoreVertical,
+  AlertTriangle,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+
+import {
+  ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import DashboardShell from "../components/DashboardShell";
 
-type TrashFile = {
-  id: number;
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:8080";
+
+/* =========================================
+   TYPES
+========================================= */
+
+type TrashType =
+  | "folder"
+  | "pdf"
+  | "image"
+  | "document"
+  | "zip"
+  | "other";
+
+type TrashItem = {
+  id: string;
   name: string;
-  type: "pdf" | "image" | "zip" | "file";
+  type: TrashType;
+  sizeBytes: number;
   size: string;
-  location: string;
   deletedAt: string;
-  daysLeft: number;
+  parentId: string | null;
 };
 
-const initialTrashFiles: TrashFile[] = [
-  {
-    id: 1,
-    name: "Old Project Report.pdf",
-    type: "pdf",
-    size: "2.8 MB",
-    location: "My Drive / Documents",
-    deletedAt: "Today, 10:32 AM",
-    daysLeft: 29,
-  },
-  {
-    id: 2,
-    name: "Unused Images.zip",
-    type: "zip",
-    size: "14.2 MB",
-    location: "My Drive / Images",
-    deletedAt: "Yesterday, 6:15 PM",
-    daysLeft: 28,
-  },
-  {
-    id: 3,
-    name: "Screenshot.png",
-    type: "image",
-    size: "1.6 MB",
-    location: "My Drive / Images",
-    deletedAt: "2 days ago",
-    daysLeft: 27,
-  },
-  {
-    id: 4,
-    name: "Notes.txt",
-    type: "file",
-    size: "18 KB",
-    location: "My Drive / Documents",
-    deletedAt: "3 days ago",
-    daysLeft: 26,
-  },
-  {
-    id: 5,
-    name: "Resume Old.pdf",
-    type: "pdf",
-    size: "940 KB",
-    location: "My Drive / Documents",
-    deletedAt: "5 days ago",
-    daysLeft: 24,
-  },
-  {
-    id: 6,
-    name: "Database Backup.sql",
-    type: "file",
-    size: "7.4 MB",
-    location: "My Drive / Backup",
-    deletedAt: "8 days ago",
-    daysLeft: 21,
-  },
-];
+/* =========================================
+   BACKEND TYPE
+========================================= */
+
+type BackendTrashItem = {
+  id: string | number;
+
+  name?: string;
+  fileName?: string;
+  filename?: string;
+
+  type?: string;
+  fileType?: string;
+
+  mimeType?: string;
+  contentType?: string;
+
+  size?: number | string;
+  fileSize?: number | string;
+
+  deletedAt?: string;
+  deleted_at?: string;
+
+  updatedAt?: string;
+  createdAt?: string;
+
+  parentId?: string | number | null;
+  folderId?: string | number | null;
+
+  folder?: boolean;
+  isFolder?: boolean;
+};
+
+/* =========================================
+   AUTH TOKEN
+========================================= */
+
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const possibleKeys = [
+    "token",
+    "accessToken",
+    "jwt",
+    "authToken",
+    "cloudstorage_token",
+    "cloud-storage-token",
+  ];
+
+  for (const key of possibleKeys) {
+    const value =
+      localStorage.getItem(key);
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+/* =========================================
+   API REQUEST
+========================================= */
+
+async function apiRequest<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const token = getAuthToken();
+
+  const headers = new Headers(
+    options.headers
+  );
+
+  if (!(options.body instanceof FormData)) {
+    headers.set(
+      "Content-Type",
+      "application/json"
+    );
+  }
+
+  if (token) {
+    headers.set(
+      "Authorization",
+      token.startsWith("Bearer ")
+        ? token
+        : `Bearer ${token}`
+    );
+  }
+
+  const response = await fetch(
+    `${API_BASE}${endpoint}`,
+    {
+      ...options,
+      headers,
+      cache: "no-store",
+    }
+  );
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const contentType =
+    response.headers.get(
+      "content-type"
+    );
+
+  let data: unknown = null;
+
+  if (
+    contentType?.includes(
+      "application/json"
+    )
+  ) {
+    data = await response.json();
+  } else {
+    const text =
+      await response.text();
+
+    data = text || null;
+  }
+
+  if (!response.ok) {
+    let message =
+      "Something went wrong.";
+
+    if (
+      typeof data === "object" &&
+      data !== null
+    ) {
+      const objectData =
+        data as Record<
+          string,
+          unknown
+        >;
+
+      message = String(
+        objectData.message ||
+          objectData.error ||
+          objectData.detail ||
+          message
+      );
+    } else if (
+      typeof data === "string" &&
+      data.trim()
+    ) {
+      message = data;
+    }
+
+    if (
+      response.status === 401 ||
+      response.status === 403
+    ) {
+      throw new Error(
+        "Your session has expired. Please login again."
+      );
+    }
+
+    throw new Error(message);
+  }
+
+  return data as T;
+}
+
+/* =========================================
+   SIZE
+========================================= */
+
+function parseSize(
+  value:
+    | number
+    | string
+    | null
+    | undefined
+): number {
+  if (
+    typeof value === "number"
+  ) {
+    return Number.isFinite(value)
+      ? value
+      : 0;
+  }
+
+  if (
+    typeof value !== "string"
+  ) {
+    return 0;
+  }
+
+  const text =
+    value.trim();
+
+  if (!text) return 0;
+
+  const number =
+    Number(text);
+
+  if (Number.isFinite(number)) {
+    return number;
+  }
+
+  const match =
+    text.match(
+      /^([\d.]+)\s*(B|KB|MB|GB|TB)$/i
+    );
+
+  if (!match) return 0;
+
+  const amount =
+    Number(match[1]);
+
+  const unit =
+    match[2].toUpperCase();
+
+  const multipliers: Record<
+    string,
+    number
+  > = {
+    B: 1,
+    KB: 1024,
+    MB: 1024 ** 2,
+    GB: 1024 ** 3,
+    TB: 1024 ** 4,
+  };
+
+  return (
+    amount *
+    (multipliers[unit] || 1)
+  );
+}
+
+/* =========================================
+   FORMAT SIZE
+========================================= */
+
+function formatSize(
+  bytes: number
+): string {
+  if (
+    !Number.isFinite(bytes) ||
+    bytes <= 0
+  ) {
+    return "0 B";
+  }
+
+  const units = [
+    "B",
+    "KB",
+    "MB",
+    "GB",
+    "TB",
+  ];
+
+  const index = Math.min(
+    Math.floor(
+      Math.log(bytes) /
+        Math.log(1024)
+    ),
+    units.length - 1
+  );
+
+  return `${(
+    bytes /
+    Math.pow(1024, index)
+  ).toFixed(
+    index === 0 ? 0 : 1
+  )} ${units[index]}`;
+}
+
+/* =========================================
+   DATE
+========================================= */
+
+function formatDeletedDate(
+  value?: string
+): string {
+  if (!value) {
+    return "Recently";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return value;
+  }
+
+  const now =
+    new Date();
+
+  const difference = Math.max(
+    0,
+    now.getTime() -
+      date.getTime()
+  );
+
+  const minutes =
+    Math.floor(
+      difference / 60000
+    );
+
+  const hours =
+    Math.floor(
+      difference / 3600000
+    );
+
+  const days =
+    Math.floor(
+      difference / 86400000
+    );
+
+  if (minutes < 1) {
+    return "Just now";
+  }
+
+  if (minutes < 60) {
+    return `${minutes} min ago`;
+  }
+
+  if (hours < 24) {
+    return `${hours} hr${
+      hours === 1
+        ? ""
+        : "s"
+    } ago`;
+  }
+
+  if (days === 1) {
+    return "Yesterday";
+  }
+
+  if (days < 7) {
+    return `${days} days ago`;
+  }
+
+  return date.toLocaleDateString(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }
+  );
+}
+
+/* =========================================
+   TYPE DETECTION
+========================================= */
+
+function getTrashType(
+  name: string,
+  mimeType = "",
+  backendType = ""
+): TrashType {
+  if (
+    backendType
+      .toLowerCase()
+      .includes("folder")
+  ) {
+    return "folder";
+  }
+
+  if (
+    mimeType
+      .toLowerCase()
+      .startsWith(
+        "image/"
+      )
+  ) {
+    return "image";
+  }
+
+  if (
+    mimeType.toLowerCase() ===
+    "application/pdf"
+  ) {
+    return "pdf";
+  }
+
+  if (
+    mimeType
+      .toLowerCase()
+      .includes("zip") ||
+    mimeType
+      .toLowerCase()
+      .includes(
+        "compressed"
+      )
+  ) {
+    return "zip";
+  }
+
+  const extension =
+    name
+      .split(".")
+      .pop()
+      ?.toLowerCase();
+
+  if (
+    extension === "pdf"
+  ) {
+    return "pdf";
+  }
+
+  if (
+    [
+      "jpg",
+      "jpeg",
+      "png",
+      "gif",
+      "webp",
+      "svg",
+      "bmp",
+      "avif",
+      "heic",
+      "heif",
+    ].includes(
+      extension || ""
+    )
+  ) {
+    return "image";
+  }
+
+  if (
+    [
+      "zip",
+      "rar",
+      "7z",
+      "tar",
+      "gz",
+    ].includes(
+      extension || ""
+    )
+  ) {
+    return "zip";
+  }
+
+  if (
+    [
+      "doc",
+      "docx",
+      "txt",
+      "xls",
+      "xlsx",
+      "ppt",
+      "pptx",
+      "csv",
+    ].includes(
+      extension || ""
+    )
+  ) {
+    return "document";
+  }
+
+  return "other";
+}
+
+/* =========================================
+   NORMALIZE
+========================================= */
+
+function normalizeTrashItem(
+  item: BackendTrashItem
+): TrashItem {
+  const name =
+    item.name ||
+    item.fileName ||
+    item.filename ||
+    "Untitled";
+
+  const mime =
+    item.mimeType ||
+    item.contentType ||
+    "";
+
+  const backendType =
+    item.fileType ||
+    item.type ||
+    "";
+
+  const type =
+    item.folder ||
+    item.isFolder
+      ? "folder"
+      : getTrashType(
+          name,
+          mime,
+          backendType
+        );
+
+  const sizeBytes =
+    type === "folder"
+      ? 0
+      : parseSize(
+          item.size ??
+            item.fileSize
+        );
+
+  return {
+    id: String(
+      item.id
+    ),
+
+    name,
+
+    type,
+
+    sizeBytes,
+
+    size:
+      type === "folder"
+        ? "—"
+        : formatSize(
+            sizeBytes
+          ),
+
+    deletedAt:
+      item.deletedAt ||
+      item.deleted_at ||
+      item.updatedAt ||
+      item.createdAt ||
+      "",
+
+    parentId:
+      item.parentId ===
+        null ||
+      item.parentId ===
+        undefined
+        ? item.folderId ===
+          null ||
+          item.folderId ===
+            undefined
+          ? null
+          : String(
+              item.folderId
+            )
+        : String(
+            item.parentId
+          ),
+  };
+}
+
+/* =========================================
+   PAGE
+========================================= */
 
 export default function TrashPage() {
-  const [files, setFiles] =
-    useState<TrashFile[]>(initialTrashFiles);
+  const [items, setItems] =
+    useState<TrashItem[]>(
+      []
+    );
 
-  const [search, setSearch] = useState("");
+  const [loading, setLoading] =
+    useState(true);
+
+  const [refreshing, setRefreshing] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const [search, setSearch] =
+    useState("");
+
+  const [sortBy, setSortBy] =
+    useState<
+      "recent" | "name" | "size"
+    >("recent");
+
+  const [view, setView] =
+    useState<
+      "grid" | "list"
+    >("grid");
 
   const [selectedIds, setSelectedIds] =
-    useState<number[]>([]);
+    useState<Set<string>>(
+      new Set()
+    );
+
+  const [restoreId, setRestoreId] =
+    useState<string | null>(
+      null
+    );
+
+  const [deleteId, setDeleteId] =
+    useState<string | null>(
+      null
+    );
 
   const [showEmptyConfirm, setShowEmptyConfirm] =
     useState(false);
 
-  const [showPermanentConfirm, setShowPermanentConfirm] =
+  const [emptyingTrash, setEmptyingTrash] =
     useState(false);
 
-  const filteredFiles = useMemo(() => {
-    if (!search.trim()) return files;
+  /* =========================================
+     LOAD TRASH
+  ========================================== */
 
-    return files.filter(
-      (file) =>
-        file.name
-          .toLowerCase()
-          .includes(search.toLowerCase()) ||
-        file.location
-          .toLowerCase()
-          .includes(search.toLowerCase())
+  const loadTrash =
+    useCallback(
+      async (
+        showLoader = true
+      ) => {
+        try {
+          if (showLoader) {
+            setLoading(true);
+          } else {
+            setRefreshing(true);
+          }
+
+          setError("");
+
+          const response =
+            await apiRequest<unknown>(
+              "/api/trash"
+            );
+
+          let rawItems:
+            BackendTrashItem[] =
+            [];
+
+          if (
+            Array.isArray(
+              response
+            )
+          ) {
+            rawItems =
+              response as BackendTrashItem[];
+          } else if (
+            response &&
+            typeof response ===
+              "object"
+          ) {
+            const data =
+              response as Record<
+                string,
+                unknown
+              >;
+
+            if (
+              Array.isArray(
+                data.content
+              )
+            ) {
+              rawItems =
+                data.content as BackendTrashItem[];
+            } else if (
+              Array.isArray(
+                data.items
+              )
+            ) {
+              rawItems =
+                data.items as BackendTrashItem[];
+            } else if (
+              Array.isArray(
+                data.files
+              )
+            ) {
+              rawItems =
+                data.files as BackendTrashItem[];
+            } else if (
+              Array.isArray(
+                data.data
+              )
+            ) {
+              rawItems =
+                data.data as BackendTrashItem[];
+            }
+          }
+
+          const normalized =
+            rawItems.map(
+              normalizeTrashItem
+            );
+
+          setItems(
+            normalized
+          );
+
+          setSelectedIds(
+            new Set()
+          );
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load Trash."
+          );
+        } finally {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      },
+      []
     );
-  }, [files, search]);
 
-  const allSelected =
-    filteredFiles.length > 0 &&
-    filteredFiles.every((file) =>
-      selectedIds.includes(file.id)
+  /* =========================================
+     INITIAL LOAD
+  ========================================== */
+
+  useEffect(() => {
+    loadTrash();
+  }, [loadTrash]);
+
+  /* =========================================
+     SELECTED
+  ========================================== */
+
+  const filteredItems =
+    useMemo(() => {
+      let result =
+        items.filter(
+          (item) =>
+            item.name
+              .toLowerCase()
+              .includes(
+                search
+                  .trim()
+                  .toLowerCase()
+              )
+        );
+
+      if (
+        sortBy === "name"
+      ) {
+        result =
+          [...result].sort(
+            (a, b) =>
+              a.name.localeCompare(
+                b.name
+              )
+          );
+      }
+
+      if (
+        sortBy === "size"
+      ) {
+        result =
+          [...result].sort(
+            (a, b) =>
+              b.sizeBytes -
+              a.sizeBytes
+          );
+      }
+
+      if (
+        sortBy === "recent"
+      ) {
+        result =
+          [...result].sort(
+            (a, b) => {
+              const dateA =
+                new Date(
+                  a.deletedAt
+                ).getTime();
+
+              const dateB =
+                new Date(
+                  b.deletedAt
+                ).getTime();
+
+              return (
+                dateB - dateA
+              );
+            }
+          );
+      }
+
+      return result;
+    }, [
+      items,
+      search,
+      sortBy,
+    ]);
+
+  /* =========================================
+     STORAGE
+  ========================================== */
+
+  const deletedBytes =
+    items.reduce(
+      (total, item) =>
+        total +
+        item.sizeBytes,
+      0
     );
 
-  function toggleSelect(id: number) {
-    setSelectedIds((current) =>
-      current.includes(id)
-        ? current.filter((item) => item !== id)
-        : [...current, id]
+  /* =========================================
+     SELECTION
+  ========================================== */
+
+  const allVisibleSelected =
+    filteredItems.length >
+      0 &&
+    filteredItems.every(
+      (item) =>
+        selectedIds.has(
+          item.id
+        )
+    );
+
+  function toggleSelect(
+    id: string
+  ) {
+    setSelectedIds(
+      (previous) => {
+        const next =
+          new Set(
+            previous
+          );
+
+        if (
+          next.has(id)
+        ) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+
+        return next;
+      }
     );
   }
 
   function toggleSelectAll() {
-    if (allSelected) {
-      setSelectedIds((current) =>
-        current.filter(
-          (id) =>
-            !filteredFiles.some(
-              (file) => file.id === id
-            )
-        )
+    if (
+      allVisibleSelected
+    ) {
+      setSelectedIds(
+        (previous) => {
+          const next =
+            new Set(
+              previous
+            );
+
+          filteredItems.forEach(
+            (item) =>
+              next.delete(
+                item.id
+              )
+          );
+
+          return next;
+        }
       );
+
       return;
     }
 
-    setSelectedIds((current) => [
-      ...new Set([
-        ...current,
-        ...filteredFiles.map(
-          (file) => file.id
-        ),
-      ]),
-    ]);
-  }
+    setSelectedIds(
+      (previous) => {
+        const next =
+          new Set(
+            previous
+          );
 
-  function restoreFile(id: number) {
-    setFiles((current) =>
-      current.filter(
-        (file) => file.id !== id
-      )
-    );
+        filteredItems.forEach(
+          (item) =>
+            next.add(
+              item.id
+            )
+        );
 
-    setSelectedIds((current) =>
-      current.filter((item) => item !== id)
+        return next;
+      }
     );
   }
 
-  function restoreSelected() {
-    setFiles((current) =>
-      current.filter(
-        (file) =>
-          !selectedIds.includes(file.id)
-      )
-    );
+  /* =========================================
+     RESTORE
+  ========================================== */
 
-    setSelectedIds([]);
+  async function restoreItem(
+    id: string
+  ) {
+    try {
+      setRestoreId(id);
+      setError("");
+
+      await apiRequest(
+        `/api/trash/${encodeURIComponent(
+          id
+        )}/restore`,
+        {
+          method: "POST",
+        }
+      );
+
+      await loadTrash(
+        false
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Restore failed."
+      );
+    } finally {
+      setRestoreId(null);
+    }
   }
 
-  function permanentlyDeleteSelected() {
-    setFiles((current) =>
-      current.filter(
-        (file) =>
-          !selectedIds.includes(file.id)
-      )
-    );
+  /* =========================================
+     PERMANENT DELETE
+  ========================================== */
 
-    setSelectedIds([]);
-    setShowPermanentConfirm(false);
+  async function permanentlyDelete(
+    id: string
+  ) {
+    const item =
+      items.find(
+        (entry) =>
+          entry.id === id
+      );
+
+    if (!item) return;
+
+    const confirmed =
+      window.confirm(
+        `Permanently delete "${item.name}"? This action cannot be undone.`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setDeleteId(id);
+      setError("");
+
+      await apiRequest(
+        `/api/trash/${encodeURIComponent(
+          id
+        )}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      await loadTrash(
+        false
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Permanent delete failed."
+      );
+    } finally {
+      setDeleteId(null);
+    }
   }
 
-  function emptyTrash() {
-    setFiles([]);
-    setSelectedIds([]);
-    setShowEmptyConfirm(false);
+  /* =========================================
+     RESTORE SELECTED
+  ========================================== */
+
+  async function restoreSelected() {
+    const ids =
+      Array.from(
+        selectedIds
+      );
+
+    if (!ids.length) {
+      return;
+    }
+
+    try {
+      setError("");
+
+      for (const id of ids) {
+        await apiRequest(
+          `/api/trash/${encodeURIComponent(
+            id
+          )}/restore`,
+          {
+            method: "POST",
+          }
+        );
+      }
+
+      await loadTrash(
+        false
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to restore selected items."
+      );
+    }
   }
+
+  /* =========================================
+     DELETE SELECTED
+  ========================================== */
+
+  async function deleteSelected() {
+    const ids =
+      Array.from(
+        selectedIds
+      );
+
+    if (!ids.length) {
+      return;
+    }
+
+    const confirmed =
+      window.confirm(
+        `Permanently delete ${ids.length} selected item${
+          ids.length === 1
+            ? ""
+            : "s"
+        }? This cannot be undone.`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setError("");
+
+      for (const id of ids) {
+        await apiRequest(
+          `/api/trash/${encodeURIComponent(
+            id
+          )}`,
+          {
+            method: "DELETE",
+          }
+        );
+      }
+
+      await loadTrash(
+        false
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to permanently delete selected items."
+      );
+    }
+  }
+
+  /* =========================================
+     EMPTY TRASH
+  ========================================== */
+
+  async function emptyTrash() {
+    try {
+      setEmptyingTrash(true);
+      setError("");
+
+      await apiRequest(
+        "/api/trash/empty",
+        {
+          method: "DELETE",
+        }
+      );
+
+      setShowEmptyConfirm(
+        false
+      );
+
+      await loadTrash(
+        false
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to empty Trash."
+      );
+    } finally {
+      setEmptyingTrash(false);
+    }
+  }
+
+  /* =========================================
+     RENDER
+  ========================================== */
 
   return (
     <DashboardShell>
-      <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="mx-auto max-w-[1450px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
 
-        {/* ===================================== */}
-        {/* HEADER */}
-        {/* ===================================== */}
+        {/* =====================================
+            HEADER
+        ====================================== */}
 
-        <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+
           <div>
             <div className="mb-3 flex items-center gap-2">
+
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-50 dark:bg-red-500/10">
-                <Trash2 className="h-4.5 w-4.5 text-red-500" />
+                <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
               </div>
 
-              <span className="text-sm font-medium text-red-500">
-                Recently Deleted
+              <span className="text-sm font-semibold text-red-600 dark:text-red-400">
+                Recycle Bin
               </span>
             </div>
 
@@ -217,282 +1176,488 @@ export default function TrashPage() {
               Trash
             </h1>
 
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-              Files in Trash are automatically deleted
-              permanently after 30 days.
+            <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
+              Deleted files stay here until you restore or permanently delete them.
             </p>
           </div>
 
-          {files.length > 0 && (
+          <div className="flex flex-wrap gap-3">
+
             <button
+              type="button"
               onClick={() =>
-                setShowEmptyConfirm(true)
+                loadTrash(false)
               }
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-100 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/15"
+              disabled={
+                refreshing
+              }
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
             >
-              <Trash2 className="h-4 w-4" />
-              Empty Trash
-            </button>
-          )}
-        </div>
-
-        {/* ===================================== */}
-        {/* WARNING */}
-        {/* ===================================== */}
-
-        <div className="mb-7 flex gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-500/20 dark:bg-amber-500/10">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-500/10">
-            <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-          </div>
-
-          <div>
-            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-              Files are automatically deleted
-            </h3>
-
-            <p className="mt-1 text-xs leading-5 text-amber-700/80 dark:text-amber-300/70">
-              Items in your Trash will be permanently
-              deleted after 30 days. Restore anything
-              you still need before then.
-            </p>
-          </div>
-        </div>
-
-        {/* ===================================== */}
-        {/* STATS */}
-        {/* ===================================== */}
-
-        <div className="mb-7 grid gap-4 sm:grid-cols-3">
-          <TrashStat
-            label="Items in Trash"
-            value={String(files.length)}
-            icon={<Trash2 />}
-          />
-
-          <TrashStat
-            label="Selected"
-            value={String(selectedIds.length)}
-            icon={<Check />}
-          />
-
-          <TrashStat
-            label="Storage to Recover"
-            value={calculateTotalSize(files)}
-            icon={<RotateCcw />}
-          />
-        </div>
-
-        {/* ===================================== */}
-        {/* TOOLBAR */}
-        {/* ===================================== */}
-
-        <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-
-            <div className="relative w-full lg:max-w-md">
-              <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-
-              <input
-                value={search}
-                onChange={(e) =>
-                  setSearch(e.target.value)
-                }
-                placeholder="Search trash..."
-                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-slate-500"
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  refreshing
+                    ? "animate-spin"
+                    : ""
+                }`}
               />
-            </div>
+              Refresh
+            </button>
 
-            {selectedIds.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={restoreSelected}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-blue-500"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Restore Selected
-                </button>
-
-                <button
-                  onClick={() =>
-                    setShowPermanentConfirm(
-                      true
-                    )
-                  }
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-600 transition hover:bg-red-100 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-400"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Delete Permanently
-                </button>
-              </div>
+            {items.length >
+              0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setShowEmptyConfirm(
+                    true
+                  )
+                }
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500"
+              >
+                <Trash2 className="h-4 w-4" />
+                Empty Trash
+              </button>
             )}
           </div>
         </div>
 
-        {/* ===================================== */}
-        {/* FILE LIST */}
-        {/* ===================================== */}
+        {/* =====================================
+            WARNING
+        ====================================== */}
 
-        {filteredFiles.length === 0 ? (
-          <EmptyTrash search={search} />
-        ) : (
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+        {items.length >
+          0 && (
+          <div className="mt-6 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 dark:border-amber-500/20 dark:bg-amber-500/10">
 
-            {/* Table Header */}
-            <div className="hidden grid-cols-[40px_minmax(260px,1fr)_230px_140px_170px_160px] items-center gap-4 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:border-white/10 dark:bg-white/5 lg:grid">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
 
-              <button
-                onClick={toggleSelectAll}
-                className={`flex h-5 w-5 items-center justify-center rounded border transition ${
-                  allSelected
-                    ? "border-blue-600 bg-blue-600 text-white"
-                    : "border-slate-300 dark:border-slate-600"
-                }`}
-              >
-                {allSelected && (
-                  <Check className="h-3.5 w-3.5" />
-                )}
-              </button>
+            <div>
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-300">
+                Items in Trash
+              </p>
 
-              <span>File</span>
-              <span>Location</span>
-              <span>Size</span>
-              <span>Deleted</span>
-              <span>Actions</span>
+              <p className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-400">
+                Restore items to move them back to My Files, or permanently delete them to remove them forever.
+              </p>
             </div>
-
-            {filteredFiles.map((file) => (
-              <TrashFileRow
-                key={file.id}
-                file={file}
-                selected={selectedIds.includes(
-                  file.id
-                )}
-                onSelect={() =>
-                  toggleSelect(file.id)
-                }
-                onRestore={() =>
-                  restoreFile(file.id)
-                }
-                onDelete={() => {
-                  setSelectedIds([file.id]);
-                  setShowPermanentConfirm(
-                    true
-                  );
-                }}
-              />
-            ))}
           </div>
         )}
+
+        {/* =====================================
+            ERROR
+        ====================================== */}
+
+        {error && (
+          <div className="mt-6 flex items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+
+            <span>
+              {error}
+            </span>
+
+            <button
+              type="button"
+              onClick={() =>
+                setError("")
+              }
+              className="shrink-0"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {/* =====================================
+            STORAGE / STATS
+        ====================================== */}
+
+        <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+
+          <StatCard
+            icon={
+              <Trash2 className="h-5 w-5" />
+            }
+            label="Items in Trash"
+            value={String(
+              items.length
+            )}
+          />
+
+          <StatCard
+            icon={
+              <HardDrive className="h-5 w-5" />
+            }
+            label="Trash Storage"
+            value={formatSize(
+              deletedBytes
+            )}
+          />
+
+          <StatCard
+            icon={
+              <RotateCcw className="h-5 w-5" />
+            }
+            label="Recoverable Items"
+            value={String(
+              items.length
+            )}
+          />
+        </div>
+
+        {/* =====================================
+            TOOLBAR
+        ====================================== */}
+
+        <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+
+          <div className="relative w-full lg:max-w-md">
+
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
+            <input
+              type="text"
+              value={search}
+              onChange={(
+                event: ChangeEvent<HTMLInputElement>
+              ) =>
+                setSearch(
+                  event.target.value
+                )
+              }
+              placeholder="Search deleted files..."
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+
+            {selectedIds.size >
+              0 && (
+              <>
+                <button
+                  type="button"
+                  onClick={
+                    restoreSelected
+                  }
+                  className="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-500"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                  Restore (
+                  {
+                    selectedIds.size
+                  }
+                  )
+                </button>
+
+                <button
+                  type="button"
+                  onClick={
+                    deleteSelected
+                  }
+                  className="inline-flex h-11 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 text-sm font-semibold text-red-600 transition hover:bg-red-50 dark:border-red-500/20 dark:bg-white/5 dark:text-red-400 dark:hover:bg-red-500/10"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              </>
+            )}
+
+            <div className="relative">
+
+              <select
+                value={sortBy}
+                onChange={(
+                  event
+                ) =>
+                  setSortBy(
+                    event.target
+                      .value as
+                      | "recent"
+                      | "name"
+                      | "size"
+                  )
+                }
+                className="h-11 appearance-none rounded-xl border border-slate-200 bg-white px-4 pr-9 text-sm font-medium text-slate-700 outline-none dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+              >
+                <option value="recent">
+                  Recently Deleted
+                </option>
+
+                <option value="name">
+                  Name
+                </option>
+
+                <option value="size">
+                  Size
+                </option>
+              </select>
+
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            </div>
+
+            <div className="flex h-11 rounded-xl border border-slate-200 bg-white p-1 dark:border-white/10 dark:bg-white/5">
+
+              <button
+                type="button"
+                onClick={() =>
+                  setView("grid")
+                }
+                className={`rounded-lg px-3 ${
+                  view === "grid"
+                    ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
+                    : "text-slate-400"
+                }`}
+              >
+                <Grid2X2 className="h-4 w-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setView("list")
+                }
+                className={`rounded-lg px-3 ${
+                  view === "list"
+                    ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
+                    : "text-slate-400"
+                }`}
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* =====================================
+            SELECT ALL
+        ====================================== */}
+
+        {!loading &&
+          filteredItems.length >
+            0 && (
+            <div className="mt-5 flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
+
+              <button
+                type="button"
+                onClick={
+                  toggleSelectAll
+                }
+                className="flex items-center gap-3 text-sm font-medium text-slate-600 dark:text-slate-300"
+              >
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-md border ${
+                    allVisibleSelected
+                      ? "border-blue-600 bg-blue-600 text-white"
+                      : "border-slate-300 dark:border-white/20"
+                  }`}
+                >
+                  {allVisibleSelected && (
+                    <Check className="h-3.5 w-3.5" />
+                  )}
+                </span>
+
+                Select all
+              </button>
+
+              <span className="text-xs text-slate-400">
+                {filteredItems.length}{" "}
+                item
+                {filteredItems.length ===
+                1
+                  ? ""
+                  : "s"}
+              </span>
+            </div>
+          )}
+
+        {/* =====================================
+            CONTENT
+        ====================================== */}
+
+        <div className="mt-4">
+
+          {loading ? (
+            <LoadingState />
+          ) : filteredItems.length ===
+            0 ? (
+            <EmptyTrash
+              search={search}
+              onClearSearch={() =>
+                setSearch("")
+              }
+            />
+          ) : view ===
+            "grid" ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+
+              {filteredItems.map(
+                (item) => (
+                  <TrashCard
+                    key={item.id}
+                    item={item}
+                    selected={selectedIds.has(
+                      item.id
+                    )}
+                    restoring={
+                      restoreId ===
+                      item.id
+                    }
+                    deleting={
+                      deleteId ===
+                      item.id
+                    }
+                    onSelect={() =>
+                      toggleSelect(
+                        item.id
+                      )
+                    }
+                    onRestore={() =>
+                      restoreItem(
+                        item.id
+                      )
+                    }
+                    onDelete={() =>
+                      permanentlyDelete(
+                        item.id
+                      )
+                    }
+                  />
+                )
+              )}
+            </div>
+          ) : (
+            <TrashList
+              items={
+                filteredItems
+              }
+              selectedIds={
+                selectedIds
+              }
+              restoreId={
+                restoreId
+              }
+              deleteId={
+                deleteId
+              }
+              onSelect={
+                toggleSelect
+              }
+              onRestore={
+                restoreItem
+              }
+              onDelete={
+                permanentlyDelete
+              }
+            />
+          )}
+        </div>
+
+        {/* =====================================
+            EMPTY TRASH MODAL
+        ====================================== */}
+
+        {showEmptyConfirm && (
+          <ConfirmModal
+            title="Empty Trash?"
+            description="All items currently in Trash will be permanently deleted. This action cannot be undone."
+            confirmText={
+              emptyingTrash
+                ? "Deleting..."
+                : "Empty Trash"
+            }
+            danger
+            loading={
+              emptyingTrash
+            }
+            onClose={() =>
+              setShowEmptyConfirm(
+                false
+              )
+            }
+            onConfirm={
+              emptyTrash
+            }
+          />
+        )}
       </div>
-
-      {/* ===================================== */}
-      {/* EMPTY TRASH MODAL */}
-      {/* ===================================== */}
-
-      {showEmptyConfirm && (
-        <ConfirmModal
-          title="Empty Trash?"
-          description="All files in Trash will be permanently deleted. This action cannot be undone."
-          confirmText="Empty Trash"
-          danger
-          onCancel={() =>
-            setShowEmptyConfirm(false)
-          }
-          onConfirm={emptyTrash}
-        />
-      )}
-
-      {/* ===================================== */}
-      {/* PERMANENT DELETE MODAL */}
-      {/* ===================================== */}
-
-      {showPermanentConfirm && (
-        <ConfirmModal
-          title="Delete Permanently?"
-          description={`${
-            selectedIds.length
-          } selected ${
-            selectedIds.length === 1
-              ? "file"
-              : "files"
-          } will be permanently deleted. This action cannot be undone.`}
-          confirmText="Delete Permanently"
-          danger
-          onCancel={() =>
-            setShowPermanentConfirm(false)
-          }
-          onConfirm={
-            permanentlyDeleteSelected
-          }
-        />
-      )}
     </DashboardShell>
   );
 }
 
-/* ========================================= */
-/* STAT CARD */
-/* ========================================= */
+/* =========================================
+   STAT CARD
+========================================= */
 
-function TrashStat({
+function StatCard({
+  icon,
   label,
   value,
-  icon,
 }: {
+  icon: React.ReactNode;
   label: string;
   value: string;
-  icon: React.ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
-      <div className="flex items-center justify-between">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-white/5 dark:text-slate-300">
+
+      <div className="flex items-center gap-4">
+
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-slate-300">
           {icon}
         </div>
 
-        <span className="text-2xl font-bold text-slate-900 dark:text-white">
-          {value}
-        </span>
+        <div>
+          <p className="text-xs font-medium text-slate-400">
+            {label}
+          </p>
+
+          <p className="mt-1 text-xl font-bold text-slate-900 dark:text-white">
+            {value}
+          </p>
+        </div>
       </div>
-
-      <p className="mt-4 text-sm font-semibold text-slate-800 dark:text-white">
-        {label}
-      </p>
-
-      <p className="mt-1 text-xs text-slate-400">
-        Current storage status
-      </p>
     </div>
   );
 }
 
-/* ========================================= */
-/* FILE ROW */
-/* ========================================= */
+/* =========================================
+   TRASH CARD
+========================================= */
 
-function TrashFileRow({
-  file,
+function TrashCard({
+  item,
   selected,
+  restoring,
+  deleting,
   onSelect,
   onRestore,
   onDelete,
 }: {
-  file: TrashFile;
+  item: TrashItem;
   selected: boolean;
+  restoring: boolean;
+  deleting: boolean;
   onSelect: () => void;
   onRestore: () => void;
   onDelete: () => void;
 }) {
   return (
-    <div className="border-b border-slate-100 px-4 py-4 last:border-0 dark:border-white/5 lg:grid lg:grid-cols-[40px_minmax(260px,1fr)_230px_140px_170px_160px] lg:items-center lg:gap-4 lg:px-5">
+    <div
+      className={`group relative rounded-2xl border bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:shadow-md dark:bg-white/[0.04] ${
+        selected
+          ? "border-blue-500 ring-4 ring-blue-500/10"
+          : "border-slate-200 dark:border-white/10"
+      }`}
+    >
 
-      {/* Checkbox */}
+      {/* CHECKBOX */}
+
       <button
+        type="button"
         onClick={onSelect}
-        className={`hidden h-5 w-5 items-center justify-center rounded border transition lg:flex ${
+        className={`absolute right-4 top-4 z-10 flex h-6 w-6 items-center justify-center rounded-md border ${
           selected
             ? "border-blue-600 bg-blue-600 text-white"
-            : "border-slate-300 dark:border-slate-600"
+            : "border-slate-300 bg-white/90 dark:border-white/20 dark:bg-slate-900/90"
         }`}
       >
         {selected && (
@@ -500,255 +1665,465 @@ function TrashFileRow({
         )}
       </button>
 
-      {/* File */}
-      <div className="flex min-w-0 items-center gap-3">
-        <button
-          onClick={onSelect}
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition ${
-            selected
-              ? "bg-blue-50 dark:bg-blue-500/10"
-              : "bg-slate-50 dark:bg-white/5"
-          }`}
-        >
-          <TrashFileIcon type={file.type} />
-        </button>
+      {/* ICON */}
 
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
-            {file.name}
-          </p>
+      <div className="flex items-start justify-between">
 
-          <p className="mt-1 truncate text-xs text-slate-400 lg:hidden">
-            {file.location}
-          </p>
-
-          <p className="mt-1 text-xs text-red-500 lg:hidden">
-            {file.daysLeft} days remaining
-          </p>
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
+          <TrashIcon
+            type={item.type}
+          />
         </div>
+
+        <MoreHorizontal className="h-5 w-5 text-slate-300" />
       </div>
 
-      {/* Location */}
-      <div className="mt-3 hidden min-w-0 lg:mt-0 lg:block">
-        <div className="flex items-center gap-2">
-          <FolderOpen className="h-4 w-4 shrink-0 text-slate-400" />
+      {/* NAME */}
 
-          <span className="truncate text-xs text-slate-500 dark:text-slate-400">
-            {file.location}
+      <div className="mt-4">
+
+        <p className="truncate pr-8 text-sm font-semibold text-slate-800 dark:text-white">
+          {item.name}
+        </p>
+
+        <div className="mt-2 flex items-center justify-between gap-2">
+
+          <span className="text-xs text-slate-400">
+            {item.type ===
+            "folder"
+              ? "Folder"
+              : item.size}
+          </span>
+
+          <span className="truncate text-xs text-slate-400">
+            {formatDeletedDate(
+              item.deletedAt
+            )}
           </span>
         </div>
       </div>
 
-      {/* Size */}
-      <div className="mt-3 hidden text-xs text-slate-500 dark:text-slate-400 lg:mt-0 lg:block">
-        {file.size}
-      </div>
+      {/* ACTIONS */}
 
-      {/* Deleted */}
-      <div className="mt-3 hidden lg:mt-0 lg:block">
-        <p className="text-xs text-slate-600 dark:text-slate-300">
-          {file.deletedAt}
-        </p>
-
-        <p className="mt-1 text-[11px] text-red-500">
-          {file.daysLeft} days remaining
-        </p>
-      </div>
-
-      {/* Actions */}
-      <div className="mt-4 flex items-center gap-2 lg:mt-0">
+      <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 dark:border-white/5">
 
         <button
-          onClick={onRestore}
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-600 transition hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/15 lg:flex-none"
+          type="button"
+          onClick={
+            onRestore
+          }
+          disabled={
+            restoring ||
+            deleting
+          }
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-600 transition hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
         >
-          <RotateCcw className="h-3.5 w-3.5" />
+          {restoring ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RotateCcw className="h-3.5 w-3.5" />
+          )}
+
           Restore
         </button>
 
         <button
-          onClick={onDelete}
-          className="flex items-center justify-center rounded-lg border border-red-200 p-2 text-red-500 transition hover:bg-red-50 dark:border-red-500/20 dark:hover:bg-red-500/10"
-          title="Delete permanently"
+          type="button"
+          onClick={
+            onDelete
+          }
+          disabled={
+            restoring ||
+            deleting
+          }
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100 disabled:opacity-50 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
         >
-          <Trash2 className="h-4 w-4" />
-        </button>
+          {deleting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Trash2 className="h-3.5 w-3.5" />
+          )}
 
-        <button
-          className="hidden rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white lg:block"
-          title="More"
-        >
-          <MoreVertical className="h-4 w-4" />
+          Delete
         </button>
       </div>
     </div>
   );
 }
 
-/* ========================================= */
-/* FILE ICON */
-/* ========================================= */
+/* =========================================
+   LIST
+========================================= */
 
-function TrashFileIcon({
-  type,
+function TrashList({
+  items,
+  selectedIds,
+  restoreId,
+  deleteId,
+  onSelect,
+  onRestore,
+  onDelete,
 }: {
-  type: TrashFile["type"];
+  items: TrashItem[];
+  selectedIds: Set<string>;
+  restoreId: string | null;
+  deleteId: string | null;
+  onSelect: (
+    id: string
+  ) => void;
+  onRestore: (
+    id: string
+  ) => void;
+  onDelete: (
+    id: string
+  ) => void;
 }) {
-  if (type === "pdf") {
-    return (
-      <FileText className="h-5.5 w-5.5 text-red-500" />
-    );
-  }
-
-  if (type === "image") {
-    return (
-      <FileImage className="h-5.5 w-5.5 text-purple-500" />
-    );
-  }
-
-  if (type === "zip") {
-    return (
-      <FileArchive className="h-5.5 w-5.5 text-yellow-500" />
-    );
-  }
-
   return (
-    <File className="h-5.5 w-5.5 text-blue-500" />
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
+
+      {/* HEADER */}
+
+      <div className="hidden grid-cols-[40px_1fr_140px_180px_210px] gap-4 border-b border-slate-200 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:border-white/10 md:grid">
+        <span />
+        <span>Name</span>
+        <span>Size</span>
+        <span>Deleted</span>
+        <span>Actions</span>
+      </div>
+
+      {items.map(
+        (item) => {
+          const selected =
+            selectedIds.has(
+              item.id
+            );
+
+          return (
+            <div
+              key={item.id}
+              className={`grid gap-3 border-b border-slate-100 px-4 py-4 last:border-0 dark:border-white/5 md:grid-cols-[40px_1fr_140px_180px_210px] md:items-center md:gap-4 md:px-5 ${
+                selected
+                  ? "bg-blue-50/50 dark:bg-blue-500/5"
+                  : "hover:bg-slate-50 dark:hover:bg-white/5"
+              }`}
+            >
+
+              {/* CHECK */}
+
+              <button
+                type="button"
+                onClick={() =>
+                  onSelect(
+                    item.id
+                  )
+                }
+                className={`flex h-5 w-5 items-center justify-center rounded-md border ${
+                  selected
+                    ? "border-blue-600 bg-blue-600 text-white"
+                    : "border-slate-300 dark:border-white/20"
+                }`}
+              >
+                {selected && (
+                  <Check className="h-3.5 w-3.5" />
+                )}
+              </button>
+
+              {/* NAME */}
+
+              <div className="flex min-w-0 items-center gap-3">
+
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
+                  <TrashIcon
+                    type={
+                      item.type
+                    }
+                  />
+                </div>
+
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
+                    {item.name}
+                  </p>
+
+                  <p className="mt-1 text-xs text-slate-400">
+                    {item.type ===
+                    "folder"
+                      ? "Folder"
+                      : item.type.toUpperCase()}
+                  </p>
+                </div>
+              </div>
+
+              {/* SIZE */}
+
+              <span className="hidden text-xs text-slate-400 md:block">
+                {item.type ===
+                "folder"
+                  ? "—"
+                  : item.size}
+              </span>
+
+              {/* DATE */}
+
+              <span className="hidden text-xs text-slate-400 md:block">
+                {formatDeletedDate(
+                  item.deletedAt
+                )}
+              </span>
+
+              {/* ACTIONS */}
+
+              <div className="flex items-center gap-2">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    onRestore(
+                      item.id
+                    )
+                  }
+                  disabled={
+                    restoreId ===
+                      item.id ||
+                    deleteId ===
+                      item.id
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-600 transition hover:bg-blue-100 disabled:opacity-50 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20"
+                >
+                  {restoreId ===
+                  item.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  )}
+
+                  Restore
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    onDelete(
+                      item.id
+                    )
+                  }
+                  disabled={
+                    restoreId ===
+                      item.id ||
+                    deleteId ===
+                      item.id
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-100 disabled:opacity-50 dark:bg-red-500/10 dark:text-red-400 dark:hover:bg-red-500/20"
+                >
+                  {deleteId ===
+                  item.id ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+
+                  Delete
+                </button>
+              </div>
+            </div>
+          );
+        }
+      )}
+    </div>
   );
 }
 
-/* ========================================= */
-/* EMPTY TRASH */
-/* ========================================= */
+/* =========================================
+   ICON
+========================================= */
+
+function TrashIcon({
+  type,
+}: {
+  type: TrashType;
+}) {
+  switch (type) {
+    case "folder":
+      return (
+        <Folder className="h-6 w-6" />
+      );
+
+    case "image":
+      return (
+        <FileImage className="h-6 w-6" />
+      );
+
+    case "pdf":
+    case "document":
+      return (
+        <FileText className="h-6 w-6" />
+      );
+
+    case "zip":
+      return (
+        <Archive className="h-6 w-6" />
+      );
+
+    default:
+      return (
+        <File className="h-6 w-6" />
+      );
+  }
+}
+
+/* =========================================
+   EMPTY STATE
+========================================= */
 
 function EmptyTrash({
   search,
+  onClearSearch,
 }: {
   search: string;
+  onClearSearch: () => void;
 }) {
   return (
-    <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-20 text-center dark:border-slate-700 dark:bg-white/[0.03]">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 dark:bg-white/5">
-        <Trash2 className="h-7 w-7 text-slate-400" />
+    <div className="flex min-h-[430px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-white/10 dark:bg-white/[0.03]">
+
+      <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-slate-100 dark:bg-white/5">
+
+        <Trash2 className="h-9 w-9 text-slate-400" />
       </div>
 
-      <h3 className="mt-5 text-lg font-semibold text-slate-900 dark:text-white">
+      <h3 className="mt-6 text-xl font-bold text-slate-900 dark:text-white">
         {search
-          ? "No files found"
+          ? "No deleted files found"
           : "Trash is empty"}
       </h3>
 
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">
+      <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">
         {search
-          ? `No deleted files match "${search}".`
-          : "Deleted files will appear here. You can restore them or permanently delete them."}
+          ? "Try another search term to find deleted items."
+          : "Files and folders you delete will appear here. You can restore them whenever you need."}
+      </p>
+
+      {search && (
+        <button
+          type="button"
+          onClick={
+            onClearSearch
+          }
+          className="mt-6 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+        >
+          Clear Search
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* =========================================
+   LOADING
+========================================= */
+
+function LoadingState() {
+  return (
+    <div className="flex min-h-[430px] flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
+
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 dark:bg-white/5">
+        <Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-400" />
+      </div>
+
+      <p className="mt-4 text-sm font-semibold text-slate-700 dark:text-slate-200">
+        Loading Trash...
+      </p>
+
+      <p className="mt-1 text-xs text-slate-400">
+        Fetching your deleted files securely.
       </p>
     </div>
   );
 }
 
-/* ========================================= */
-/* CONFIRM MODAL */
-/* ========================================= */
+/* =========================================
+   CONFIRM MODAL
+========================================= */
 
 function ConfirmModal({
   title,
   description,
   confirmText,
   danger,
-  onCancel,
+  loading,
+  onClose,
   onConfirm,
 }: {
   title: string;
   description: string;
   confirmText: string;
   danger?: boolean;
-  onCancel: () => void;
+  loading?: boolean;
+  onClose: () => void;
   onConfirm: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-950">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
 
-        <div className="flex items-start justify-between border-b border-slate-200 px-6 py-5 dark:border-white/10">
-          <div className="flex items-center gap-3">
-            <div
-              className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                danger
-                  ? "bg-red-50 text-red-500 dark:bg-red-500/10"
-                  : "bg-blue-50 text-blue-500 dark:bg-blue-500/10"
-              }`}
-            >
-              <AlertTriangle className="h-5 w-5" />
-            </div>
+      <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-slate-900">
 
+        <div className="flex items-start gap-4">
+
+          <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${
+            danger
+              ? "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400"
+              : "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
+          }`}>
+            {danger ? (
+              <AlertTriangle className="h-6 w-6" />
+            ) : (
+              <Trash2 className="h-6 w-6" />
+            )}
+          </div>
+
+          <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
               {title}
             </h2>
-          </div>
 
-          <button
-            onClick={onCancel}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-white/10"
-          >
-            <X className="h-5 w-5" />
-          </button>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              {description}
+            </p>
+          </div>
         </div>
 
-        <div className="p-6">
-          <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">
-            {description}
-          </p>
+        <div className="mt-6 flex gap-3">
 
-          <div className="mt-6 flex gap-3">
-            <button
-              onClick={onCancel}
-              className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
-            >
-              Cancel
-            </button>
+          <button
+            type="button"
+            onClick={
+              onClose
+            }
+            disabled={loading}
+            className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
+          >
+            Cancel
+          </button>
 
-            <button
-              onClick={onConfirm}
-              className={`flex-1 rounded-xl py-3 text-sm font-semibold text-white transition ${
-                danger
-                  ? "bg-red-600 hover:bg-red-500"
-                  : "bg-blue-600 hover:bg-blue-500"
-              }`}
-            >
-              {confirmText}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={
+              onConfirm
+            }
+            disabled={loading}
+            className={`flex-1 inline-flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 ${
+              danger
+                ? "bg-red-600 hover:bg-red-500"
+                : "bg-blue-600 hover:bg-blue-500"
+            }`}
+          >
+            {loading && (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            )}
+
+            {confirmText}
+          </button>
         </div>
       </div>
     </div>
   );
-}
-
-/* ========================================= */
-/* SIZE CALCULATION */
-/* ========================================= */
-
-function calculateTotalSize(
-  files: TrashFile[]
-) {
-  let totalMB = 0;
-
-  files.forEach((file) => {
-    const value = parseFloat(file.size);
-
-    if (file.size.includes("KB")) {
-      totalMB += value / 1024;
-    } else {
-      totalMB += value;
-    }
-  });
-
-  if (totalMB < 1) {
-    return `${Math.round(
-      totalMB * 1024
-    )} KB`;
-  }
-
-  return `${totalMB.toFixed(1)} MB`;
 }
