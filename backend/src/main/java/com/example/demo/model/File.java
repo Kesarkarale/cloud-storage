@@ -1,6 +1,7 @@
 package com.example.demo.model;
 
 import jakarta.persistence.*;
+
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -26,6 +27,9 @@ public class File {
 
     @Column(nullable = false)
     private UUID userId;
+
+    @Column(name = "parent_folder_id")
+    private UUID parentFolderId;
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
@@ -84,6 +88,14 @@ public class File {
 
     public void setUserId(UUID userId) {
         this.userId = userId;
+    }
+
+    public UUID getParentFolderId() {
+        return parentFolderId;
+    }
+
+    public void setParentFolderId(UUID parentFolderId) {
+        this.parentFolderId = parentFolderId;
     }
 
     public LocalDateTime getCreatedAt() {
