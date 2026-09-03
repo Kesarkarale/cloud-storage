@@ -34,12 +34,22 @@ public class File {
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean deleted = false;
+
+    @Column
+    private LocalDateTime deletedAt;
+
     public File() {
     }
 
     @PrePersist
     public void onCreate() {
         createdAt = LocalDateTime.now();
+
+        if (!deleted) {
+            deletedAt = null;
+        }
     }
 
     public UUID getId() {
@@ -100,5 +110,21 @@ public class File {
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public boolean isDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(boolean deleted) {
+        this.deleted = deleted;
+    }
+
+    public LocalDateTime getDeletedAt() {
+        return deletedAt;
+    }
+
+    public void setDeletedAt(LocalDateTime deletedAt) {
+        this.deletedAt = deletedAt;
     }
 }
