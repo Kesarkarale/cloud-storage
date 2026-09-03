@@ -35,28 +35,22 @@ public class SecurityConfig {
     ) throws Exception {
 
         http
-                // =========================
                 // CORS
-                // =========================
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .cors(cors ->
+                        cors.configurationSource(corsConfigurationSource())
+                )
 
-                // =========================
                 // CSRF
-                // =========================
                 .csrf(csrf -> csrf.disable())
 
-                // =========================
-                // SESSION
-                // =========================
+                // JWT = stateless
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(
                                 SessionCreationPolicy.STATELESS
                         )
                 )
 
-                // =========================
-                // AUTHORIZATION
-                // =========================
+                // Authorization
                 .authorizeHttpRequests(auth -> auth
 
                         .requestMatchers(
@@ -69,22 +63,26 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/me")
                         .authenticated()
 
+                        // ALL FILE APIs require login
+                        .requestMatchers("/api/files/**")
+                        .authenticated()
+
+                        // ALL FOLDER APIs require login
+                        .requestMatchers("/api/folders/**")
+                        .authenticated()
+
                         .anyRequest()
                         .permitAll()
                 )
 
-                // =========================
-                // GOOGLE OAUTH
-                // =========================
+                // Google OAuth
                 .oauth2Login(oauth ->
                         oauth.successHandler(
                                 oAuth2LoginSuccessHandler
                         )
                 )
 
-                // =========================
-                // JWT FILTER
-                // =========================
+                // JWT Filter
                 .addFilterBefore(
                         jwtAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class
@@ -92,10 +90,6 @@ public class SecurityConfig {
 
         return http.build();
     }
-
-    // =====================================================
-    // CORS CONFIGURATION
-    // =====================================================
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
