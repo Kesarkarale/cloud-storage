@@ -1,6 +1,7 @@
-"use client";
+ "use client";
 
 import {
+  AlertCircle,
   Archive,
   Check,
   ChevronDown,
@@ -16,19 +17,14 @@ import {
   List,
   Loader2,
   MoreHorizontal,
-  RefreshCw,
   Search,
-  Share2,
   Trash2,
   Upload,
   X,
-  AlertCircle,
   CloudUpload,
 } from "lucide-react";
+
 import {
-  ChangeEvent,
-  DragEvent,
-  KeyboardEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -36,14 +32,27 @@ import {
   useState,
 } from "react";
 
+import type {
+  ChangeEvent,
+  DragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  RefObject,
+} from "react";
+
 import DashboardShell from "../components/DashboardShell";
+
+/* =========================================================
+   TYPES
+========================================================= */
 
 type FileType =
   | "folder"
   | "pdf"
   | "image"
   | "document"
-  | "zip";
+  | "zip"
+  | "other";
 
 type FileItem = {
   id: string;
@@ -52,6 +61,7 @@ type FileItem = {
   size: number;
   fileType?: string;
   modified: string;
+  modifiedTimestamp: number;
 };
 
 type ToastType = "success" | "error";
@@ -61,11 +71,24 @@ type ToastState = {
   message: string;
 };
 
-const API_URL =
+/* =========================================================
+   CONFIG
+========================================================= */
+
+const API_URL = (
   process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:8080";
+  "http://localhost:8080"
+).replace(/\/+$/, "");
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+// Current backend does not expose storage-limit API.
+// Keep this as the frontend display limit for now.
+const STORAGE_LIMIT = 10 * 1024 * 1024 * 1024;
+
+/* =========================================================
+   PAGE
+========================================================= */
 
 export default function FilesPage() {
   const [files, setFiles] = useState<FileItem[]>([]);
@@ -76,9 +99,7 @@ export default function FilesPage() {
     useState<"grid" | "list">("grid");
 
   const [sortBy, setSortBy] =
-    useState<"recent" | "name" | "size">(
-      "recent"
-    );
+    useState<"recent" | "name" | "size">("recent");
 
   const [loading, setLoading] = useState(true);
 
@@ -112,6 +133,10 @@ export default function FilesPage() {
   const fileInputRef =
     useRef<HTMLInputElement>(null);
 
+  /* =========================================================
+     TOAST
+  ========================================================= */
+
   const showToast = useCallback(
     (
       type: ToastType,
@@ -121,17 +146,25 @@ export default function FilesPage() {
         type,
         message,
       });
-
-      window.setTimeout(() => {
-        setToast(null);
-      }, 3500);
     },
     []
   );
 
-  /* =========================================
+  useEffect(() => {
+    if (!toast) return;
+
+    const timer = window.setTimeout(() => {
+      setToast(null);
+    }, 3500);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [toast]);
+
+  /* =========================================================
      AUTH TOKEN
-  ========================================= */
+  ========================================================= */
 
   const getToken = useCallback(() => {
     if (typeof window === "undefined") {
@@ -145,9 +178,9 @@ export default function FilesPage() {
     );
   }, []);
 
-  /* =========================================
+  /* =========================================================
      API REQUEST
-  ========================================= */
+  ========================================================= */
 
   const apiRequest = useCallback(
     async (
@@ -156,16 +189,26 @@ export default function FilesPage() {
     ) => {
       const token = getToken();
 
+      if (!token) {
+        throw new Error(
+          "You are not logged in. Please login again."
+        );
+      }
+
       const headers = new Headers(
         options.headers
       );
 
-      if (token) {
-        headers.set(
-          "Authorization",
-          `Bearer ${token}`
-        );
-      }
+      headers.set(
+        "Authorization",
+        `Bearer ${token}`
+      );
+
+      /*
+       * IMPORTANT:
+       * Do NOT manually set Content-Type for FormData.
+       * Browser automatically adds multipart boundary.
+       */
 
       const response = await fetch(
         `${API_URL}${endpoint}`,
@@ -206,7 +249,7 @@ export default function FilesPage() {
             }
           }
         } catch {
-          // Keep default error.
+          // Keep default message.
         }
 
         if (
@@ -226,20 +269,23 @@ export default function FilesPage() {
     [getToken]
   );
 
-  /* =========================================
+  /* =========================================================
      NORMALIZE BACKEND FILE
-  ========================================= */
+  ========================================================= */
 
   const normalizeFile = useCallback(
-    (item: any): FileItem => {
+    (item: unknown): FileItem => {
+      const data =
+        item as Record<string, unknown>;
+
       const rawName =
-        item?.fileName ??
-        item?.name ??
+        data?.fileName ??
+        data?.name ??
         "Unnamed file";
 
       const rawSize =
-        item?.fileSize ??
-        item?.size ??
+        data?.fileSize ??
+        data?.size ??
         0;
 
       const numericSize =
@@ -248,46 +294,55 @@ export default function FilesPage() {
           : Number(rawSize) || 0;
 
       const rawType =
-        item?.fileType ??
-        item?.contentType ??
+        data?.fileType ??
+        data?.contentType ??
         "";
 
-      const type =
-        getFileTypeFromName(
-          rawName
-        );
-
-      const modified =
-        item?.updatedAt ??
-        item?.createdAt ??
-        item?.modifiedAt ??
-        item?.uploadedAt ??
+      const modifiedValue =
+        data?.updatedAt ??
+        data?.createdAt ??
+        data?.modifiedAt ??
+        data?.uploadedAt ??
         "";
+
+      const modifiedDate =
+        parseDate(modifiedValue);
 
       return {
         id: String(
-          item?.id ??
-            item?.fileId ??
+          data?.id ??
+            data?.fileId ??
             crypto.randomUUID()
         ),
-        name: rawName,
-        type,
+
+        name: String(rawName),
+
+        type: getFileTypeFromName(
+          String(rawName)
+        ),
+
         size: numericSize,
+
         fileType:
           typeof rawType === "string"
             ? rawType
             : undefined,
-        modified: formatModifiedDate(
-          modified
-        ),
+
+        modified:
+          formatModifiedDate(
+            modifiedValue
+          ),
+
+        modifiedTimestamp:
+          modifiedDate?.getTime() ?? 0,
       };
     },
     []
   );
 
-  /* =========================================
+  /* =========================================================
      LOAD FILES
-  ========================================= */
+  ========================================================= */
 
   const loadFiles = useCallback(
     async (
@@ -301,7 +356,9 @@ export default function FilesPage() {
         }
 
         const response =
-          await apiRequest("/api/files");
+          await apiRequest(
+            "/api/files"
+          );
 
         const data =
           await response.json();
@@ -309,7 +366,9 @@ export default function FilesPage() {
         const backendFiles =
           Array.isArray(data)
             ? data
-            : data?.files ?? [];
+            : Array.isArray(data?.files)
+            ? data.files
+            : [];
 
         const normalized =
           backendFiles.map(
@@ -343,9 +402,9 @@ export default function FilesPage() {
     loadFiles();
   }, [loadFiles]);
 
-  /* =========================================
+  /* =========================================================
      FILTER + SORT
-  ========================================= */
+  ========================================================= */
 
   const filteredFiles = useMemo(() => {
     const query =
@@ -363,7 +422,12 @@ export default function FilesPage() {
       result = [...result].sort(
         (a, b) =>
           a.name.localeCompare(
-            b.name
+            b.name,
+            undefined,
+            {
+              numeric: true,
+              sensitivity: "base",
+            }
           )
       );
     }
@@ -378,16 +442,21 @@ export default function FilesPage() {
     if (sortBy === "recent") {
       result = [...result].sort(
         (a, b) =>
-          b.id.localeCompare(a.id)
+          b.modifiedTimestamp -
+          a.modifiedTimestamp
       );
     }
 
     return result;
-  }, [files, search, sortBy]);
+  }, [
+    files,
+    search,
+    sortBy,
+  ]);
 
-  /* =========================================
+  /* =========================================================
      STORAGE
-  ========================================= */
+  ========================================================= */
 
   const usedBytes = useMemo(
     () =>
@@ -399,22 +468,22 @@ export default function FilesPage() {
     [files]
   );
 
-  const storageLimit =
-    10 * 1024 * 1024 * 1024;
-
-  const storagePercentage = Math.min(
-    100,
-    (usedBytes / storageLimit) * 100
-  );
+  const storagePercentage =
+    Math.min(
+      100,
+      (usedBytes /
+        STORAGE_LIMIT) *
+        100
+    );
 
   const freeBytes = Math.max(
     0,
-    storageLimit - usedBytes
+    STORAGE_LIMIT - usedBytes
   );
 
-  /* =========================================
+  /* =========================================================
      UPLOAD
-  ========================================= */
+  ========================================================= */
 
   async function uploadFiles(
     selected: globalThis.File[]
@@ -438,7 +507,9 @@ export default function FilesPage() {
       showToast(
         "error",
         `${rejected} file${
-          rejected > 1 ? "s" : ""
+          rejected > 1
+            ? "s"
+            : ""
         } exceeded the 100 MB limit.`
       );
     }
@@ -548,23 +619,33 @@ export default function FilesPage() {
     uploadFiles(dropped);
   }
 
-  /* =========================================
+  /* =========================================================
      DOWNLOAD
-  ========================================= */
+  ========================================================= */
 
   async function downloadFile(
     file: FileItem
   ) {
     try {
-      setDownloadingId(file.id);
+      setDownloadingId(
+        file.id
+      );
 
       const response =
         await apiRequest(
-          `/api/files/${file.id}/download`
+          `/api/files/${encodeURIComponent(
+            file.id
+          )}/download`
         );
 
       const blob =
         await response.blob();
+
+      if (!blob.size) {
+        throw new Error(
+          "Downloaded file is empty."
+        );
+      }
 
       const url =
         window.URL.createObjectURL(
@@ -572,11 +653,17 @@ export default function FilesPage() {
         );
 
       const anchor =
-        document.createElement("a");
+        document.createElement(
+          "a"
+        );
 
       anchor.href = url;
+
       anchor.download =
         file.name;
+
+      anchor.style.display =
+        "none";
 
       document.body.appendChild(
         anchor
@@ -586,9 +673,11 @@ export default function FilesPage() {
 
       anchor.remove();
 
-      window.URL.revokeObjectURL(
-        url
-      );
+      window.setTimeout(() => {
+        window.URL.revokeObjectURL(
+          url
+        );
+      }, 1000);
 
       showToast(
         "success",
@@ -609,16 +698,16 @@ export default function FilesPage() {
     }
   }
 
-  /* =========================================
+  /* =========================================================
      DELETE
-  ========================================= */
+  ========================================================= */
 
   async function deleteFile(
     file: FileItem
   ) {
     const confirmed =
       window.confirm(
-        `Delete "${file.name}"?`
+        `Delete "${file.name}"?\n\nThis action cannot be undone.`
       );
 
     if (!confirmed) {
@@ -629,17 +718,21 @@ export default function FilesPage() {
       setDeletingId(file.id);
 
       await apiRequest(
-        `/api/files/${file.id}`,
+        `/api/files/${encodeURIComponent(
+          file.id
+        )}`,
         {
           method: "DELETE",
         }
       );
 
-      setFiles((current) =>
-        current.filter(
-          (item) =>
-            item.id !== file.id
-        )
+      setFiles(
+        (current) =>
+          current.filter(
+            (item) =>
+              item.id !==
+              file.id
+          )
       );
 
       setSelectedFile(null);
@@ -663,9 +756,9 @@ export default function FilesPage() {
     }
   }
 
-  /* =========================================
+  /* =========================================================
      KEYBOARD
-  ========================================= */
+  ========================================================= */
 
   useEffect(() => {
     function handleKeyDown(
@@ -674,11 +767,11 @@ export default function FilesPage() {
       if (
         event.key === "Escape"
       ) {
-        setSelectedFile(null);
-
         if (!uploading) {
           setShowUpload(false);
         }
+
+        setSelectedFile(null);
       }
     }
 
@@ -694,13 +787,17 @@ export default function FilesPage() {
       );
   }, [uploading]);
 
+  /* =========================================================
+     UI
+  ========================================================= */
+
   return (
     <DashboardShell>
       <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
 
-        {/* =====================================
-            PAGE HEADER
-        ====================================== */}
+        {/* =================================================
+            HEADER
+        ================================================= */}
 
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
 
@@ -720,8 +817,8 @@ export default function FilesPage() {
             </h1>
 
             <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500 dark:text-slate-400">
-              Securely store, organize and
-              manage your files from one
+              Securely store, manage and
+              access your files from one
               place.
             </p>
           </div>
@@ -733,7 +830,7 @@ export default function FilesPage() {
                 setShowUpload(true)
               }
               disabled={uploading}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {uploading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -748,14 +845,13 @@ export default function FilesPage() {
           </div>
         </div>
 
-        {/* =====================================
-            STORAGE
-        ====================================== */}
+        {/* =================================================
+            STORAGE CARD
+        ================================================= */}
 
         <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
 
           <div className="p-5 sm:p-6">
-
             <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
 
               <div className="flex items-center gap-4">
@@ -804,18 +900,21 @@ export default function FilesPage() {
                     }}
                   />
                 </div>
+
               </div>
+
             </div>
           </div>
         </div>
 
-        {/* =====================================
+        {/* =================================================
             TOOLBAR
-        ====================================== */}
+        ================================================= */}
 
         <div className="mt-7 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
 
           <div className="relative w-full xl:max-w-xl">
+
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
             <input
@@ -827,6 +926,7 @@ export default function FilesPage() {
                 )
               }
               placeholder="Search your files..."
+              aria-label="Search files"
               className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-11 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
             />
 
@@ -836,6 +936,7 @@ export default function FilesPage() {
                 onClick={() =>
                   setSearch("")
                 }
+                aria-label="Clear search"
                 className="absolute right-3 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
               >
                 <X className="h-4 w-4" />
@@ -845,19 +946,22 @@ export default function FilesPage() {
 
           <div className="flex flex-wrap items-center gap-3">
 
+            {/* SORT */}
+
             <div className="relative">
+
               <select
                 value={sortBy}
                 onChange={(event) =>
                   setSortBy(
-                    event.target
-                      .value as
+                    event.target.value as
                       | "recent"
                       | "name"
                       | "size"
                   )
                 }
                 className="h-11 appearance-none rounded-xl border border-slate-200 bg-white px-4 pr-10 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
+                aria-label="Sort files"
               >
                 <option value="recent">
                   Recently modified
@@ -875,6 +979,8 @@ export default function FilesPage() {
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             </div>
 
+            {/* REFRESH */}
+
             <button
               type="button"
               onClick={() =>
@@ -884,17 +990,18 @@ export default function FilesPage() {
                 refreshing ||
                 loading
               }
-              title="Refresh"
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-800 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
+              title="Refresh files"
+              aria-label="Refresh files"
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-white"
             >
-              <RefreshCw
-                className={`h-4 w-4 ${
+              <RefreshIcon
+                refreshing={
                   refreshing
-                    ? "animate-spin"
-                    : ""
-                }`}
+                }
               />
             </button>
+
+            {/* VIEW */}
 
             <div className="flex h-11 rounded-xl border border-slate-200 bg-white p-1 dark:border-white/10 dark:bg-white/5">
 
@@ -904,6 +1011,9 @@ export default function FilesPage() {
                   setView("grid")
                 }
                 aria-label="Grid view"
+                aria-pressed={
+                  view === "grid"
+                }
                 className={`flex w-10 items-center justify-center rounded-lg transition ${
                   view === "grid"
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
@@ -919,6 +1029,9 @@ export default function FilesPage() {
                   setView("list")
                 }
                 aria-label="List view"
+                aria-pressed={
+                  view === "list"
+                }
                 className={`flex w-10 items-center justify-center rounded-lg transition ${
                   view === "list"
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
@@ -927,15 +1040,17 @@ export default function FilesPage() {
               >
                 <List className="h-4 w-4" />
               </button>
+
             </div>
           </div>
         </div>
 
-        {/* =====================================
+        {/* =================================================
             BREADCRUMB
-        ====================================== */}
+        ================================================= */}
 
         <div className="mt-7 flex items-center gap-2 text-sm">
+
           <FolderOpen className="h-4 w-4 text-blue-500" />
 
           <span className="font-semibold text-slate-900 dark:text-white">
@@ -949,14 +1064,54 @@ export default function FilesPage() {
           <span className="text-slate-400">
             All Files
           </span>
+
         </div>
 
-        {/* =====================================
+        {/* =================================================
+            RESULT COUNT
+        ================================================= */}
+
+        {!loading && (
+          <div className="mt-4 flex items-center justify-between">
+
+            <p className="text-xs text-slate-400">
+              {search
+                ? `${filteredFiles.length} result${
+                    filteredFiles.length !==
+                    1
+                      ? "s"
+                      : ""
+                  }`
+                : `${files.length} file${
+                    files.length !== 1
+                      ? "s"
+                      : ""
+                  }`}
+            </p>
+
+            {search && (
+              <button
+                type="button"
+                onClick={() =>
+                  setSearch("")
+                }
+                className="text-xs font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400"
+              >
+                Clear search
+              </button>
+            )}
+
+          </div>
+        )}
+
+        {/* =================================================
             CONTENT
-        ====================================== */}
+        ================================================= */}
 
         {loading ? (
-          <LoadingState view={view} />
+          <LoadingState
+            view={view}
+          />
         ) : filteredFiles.length ===
           0 ? (
           <EmptyState
@@ -1040,14 +1195,18 @@ export default function FilesPage() {
         )}
       </div>
 
-      {/* =====================================
+      {/* =====================================================
           UPLOAD MODAL
-      ====================================== */}
+      ===================================================== */}
 
       {showUpload && (
         <UploadModal
-          inputRef={fileInputRef}
-          uploading={uploading}
+          inputRef={
+            fileInputRef
+          }
+          uploading={
+            uploading
+          }
           progress={
             uploadProgress
           }
@@ -1077,13 +1236,15 @@ export default function FilesPage() {
         />
       )}
 
-      {/* =====================================
-          FILE DETAILS
-      ====================================== */}
+      {/* =====================================================
+          DETAILS MODAL
+      ===================================================== */}
 
       {selectedFile && (
         <FileDetailsModal
-          file={selectedFile}
+          file={
+            selectedFile
+          }
           downloading={
             downloadingId ===
             selectedFile.id
@@ -1108,9 +1269,9 @@ export default function FilesPage() {
         />
       )}
 
-      {/* =====================================
+      {/* =====================================================
           TOAST
-      ====================================== */}
+      ===================================================== */}
 
       {toast && (
         <Toast
@@ -1124,9 +1285,39 @@ export default function FilesPage() {
   );
 }
 
-/* =====================================================
+/* =========================================================
+   REFRESH ICON
+========================================================= */
+
+function RefreshIcon({
+  refreshing,
+}: {
+  refreshing: boolean;
+}) {
+  return (
+    <svg
+      className={`h-4 w-4 ${
+        refreshing
+          ? "animate-spin"
+          : ""
+      }`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  );
+}
+
+/* =========================================================
    FILE CARD
-===================================================== */
+========================================================= */
 
 function FileCard({
   file,
@@ -1143,6 +1334,10 @@ function FileCard({
   downloading: boolean;
   deleting: boolean;
 }) {
+  const busy =
+    downloading ||
+    deleting;
+
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-slate-200/50 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/30 dark:hover:shadow-black/20">
 
@@ -1151,6 +1346,7 @@ function FileCard({
         <button
           type="button"
           onClick={onClick}
+          aria-label={`Open ${file.name}`}
           className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition group-hover:bg-blue-50 group-hover:text-blue-600 dark:bg-white/10 dark:text-slate-300 dark:group-hover:bg-blue-500/10 dark:group-hover:text-blue-400"
         >
           <FileIcon
@@ -1158,16 +1354,14 @@ function FileCard({
           />
         </button>
 
-        <div className="relative">
-
-          <button
-            type="button"
-            onClick={onClick}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
-          >
-            <MoreHorizontal className="h-5 w-5" />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onClick}
+          aria-label={`More options for ${file.name}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-white"
+        >
+          <MoreHorizontal className="h-5 w-5" />
+        </button>
       </div>
 
       <button
@@ -1180,6 +1374,7 @@ function FileCard({
         </p>
 
         <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+
           <span>
             {formatBytes(
               file.size
@@ -1193,6 +1388,7 @@ function FileCard({
           <span>
             {file.modified}
           </span>
+
         </div>
       </button>
 
@@ -1201,11 +1397,8 @@ function FileCard({
         <button
           type="button"
           onClick={onDownload}
-          disabled={
-            downloading ||
-            deleting
-          }
-          className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-blue-600 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-blue-400"
+          disabled={busy}
+          className="flex flex-1 items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-blue-400"
         >
           {downloading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1219,11 +1412,9 @@ function FileCard({
         <button
           type="button"
           onClick={onDelete}
-          disabled={
-            downloading ||
-            deleting
-          }
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+          disabled={busy}
+          aria-label={`Delete ${file.name}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-500/10 dark:hover:text-red-400"
         >
           {deleting ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1231,14 +1422,15 @@ function FileCard({
             <Trash2 className="h-3.5 w-3.5" />
           )}
         </button>
+
       </div>
     </div>
   );
 }
 
-/* =====================================================
+/* =========================================================
    LIST FILE
-===================================================== */
+========================================================= */
 
 function ListFile({
   file,
@@ -1255,6 +1447,10 @@ function ListFile({
   downloading: boolean;
   deleting: boolean;
 }) {
+  const busy =
+    downloading ||
+    deleting;
+
   return (
     <div className="group grid w-full gap-3 border-b border-slate-100 px-4 py-4 transition last:border-0 hover:bg-slate-50 sm:px-5 dark:border-white/5 dark:hover:bg-white/5 md:grid-cols-[minmax(0,1fr)_140px_180px_80px] md:items-center md:gap-4">
 
@@ -1298,12 +1494,10 @@ function ListFile({
         <button
           type="button"
           onClick={onDownload}
-          disabled={
-            downloading ||
-            deleting
-          }
+          disabled={busy}
           title="Download"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 dark:hover:bg-blue-500/10 dark:hover:text-blue-400"
+          aria-label={`Download ${file.name}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-500/10 dark:hover:text-blue-400"
         >
           {downloading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1315,12 +1509,10 @@ function ListFile({
         <button
           type="button"
           onClick={onDelete}
-          disabled={
-            downloading ||
-            deleting
-          }
+          disabled={busy}
           title="Delete"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+          aria-label={`Delete ${file.name}`}
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-red-500/10 dark:hover:text-red-400"
         >
           {deleting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1328,14 +1520,15 @@ function ListFile({
             <Trash2 className="h-4 w-4" />
           )}
         </button>
+
       </div>
     </div>
   );
 }
 
-/* =====================================================
+/* =========================================================
    FILE ICON
-===================================================== */
+========================================================= */
 
 function FileIcon({
   type,
@@ -1374,9 +1567,9 @@ function FileIcon({
   );
 }
 
-/* =====================================================
+/* =========================================================
    EMPTY STATE
-===================================================== */
+========================================================= */
 
 function EmptyState({
   search,
@@ -1389,11 +1582,13 @@ function EmptyState({
     <div className="mt-6 flex min-h-[430px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-white/10 dark:bg-white/[0.03]">
 
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/10">
+
         {search ? (
           <Search className="h-7 w-7 text-blue-600 dark:text-blue-400" />
         ) : (
           <CloudUpload className="h-8 w-8 text-blue-600 dark:text-blue-400" />
         )}
+
       </div>
 
       <h3 className="mt-5 text-lg font-bold text-slate-900 dark:text-white">
@@ -1412,19 +1607,20 @@ function EmptyState({
         <button
           type="button"
           onClick={onUpload}
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500"
+          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 active:scale-[0.98]"
         >
           <Upload className="h-4 w-4" />
           Upload files
         </button>
       )}
+
     </div>
   );
 }
 
-/* =====================================================
+/* =========================================================
    LOADING
-===================================================== */
+========================================================= */
 
 function LoadingState({
   view,
@@ -1434,6 +1630,7 @@ function LoadingState({
   if (view === "list") {
     return (
       <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/[0.04]">
+
         {Array.from({
           length: 7,
         }).map((_, index) => (
@@ -1448,6 +1645,7 @@ function LoadingState({
 
               <div className="mt-2 h-3 w-1/5 animate-pulse rounded bg-slate-100 dark:bg-white/10" />
             </div>
+
           </div>
         ))}
       </div>
@@ -1468,9 +1666,9 @@ function LoadingState({
   );
 }
 
-/* =====================================================
+/* =========================================================
    UPLOAD MODAL
-===================================================== */
+========================================================= */
 
 function UploadModal({
   inputRef,
@@ -1484,7 +1682,7 @@ function UploadModal({
   onDragOver,
   onDrop,
 }: {
-  inputRef: React.RefObject<HTMLInputElement | null>;
+  inputRef: RefObject<HTMLInputElement | null>;
   uploading: boolean;
   progress: number;
   dragActive: boolean;
@@ -1509,11 +1707,13 @@ function UploadModal({
       <div className="text-center">
 
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/10">
+
           {uploading ? (
             <Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-400" />
           ) : (
             <Upload className="h-6 w-6 text-blue-600 dark:text-blue-400" />
           )}
+
         </div>
 
         <h2 className="mt-5 text-xl font-bold text-slate-900 dark:text-white">
@@ -1533,14 +1733,24 @@ function UploadModal({
             <div
               onDragEnter={(event) => {
                 event.preventDefault();
+                event.stopPropagation();
                 onDragEnter();
               }}
               onDragLeave={(event) => {
                 event.preventDefault();
+                event.stopPropagation();
                 onDragLeave();
               }}
-              onDragOver={onDragOver}
-              onDrop={onDrop}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onDragOver(event);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onDrop(event);
+              }}
               className={`mt-6 rounded-2xl border-2 border-dashed px-6 py-10 transition ${
                 dragActive
                   ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
@@ -1562,7 +1772,7 @@ function UploadModal({
                 onClick={() =>
                   inputRef.current?.click()
                 }
-                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 active:scale-[0.98]"
               >
                 <Upload className="h-4 w-4" />
                 Choose files
@@ -1570,7 +1780,7 @@ function UploadModal({
             </div>
 
             <p className="mt-4 text-xs text-slate-400">
-              Maximum file size: 100 MB
+              Maximum file size: 100 MB per file
             </p>
 
             <input
@@ -1585,6 +1795,7 @@ function UploadModal({
           <div className="mt-7">
 
             <div className="mb-2 flex justify-between text-xs">
+
               <span className="font-medium text-slate-500 dark:text-slate-400">
                 Upload progress
               </span>
@@ -1592,6 +1803,7 @@ function UploadModal({
               <span className="font-bold text-blue-600 dark:text-blue-400">
                 {progress}%
               </span>
+
             </div>
 
             <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-white/10">
@@ -1602,16 +1814,18 @@ function UploadModal({
                 }}
               />
             </div>
+
           </div>
         )}
+
       </div>
     </Modal>
   );
 }
 
-/* =====================================================
+/* =========================================================
    FILE DETAILS MODAL
-===================================================== */
+========================================================= */
 
 function FileDetailsModal({
   file,
@@ -1628,9 +1842,15 @@ function FileDetailsModal({
   onDownload: () => void;
   onDelete: () => void;
 }) {
-  return (
-    <Modal onClose={onClose}>
+  const busy =
+    downloading ||
+    deleting;
 
+  return (
+    <Modal
+      onClose={onClose}
+      disabled={busy}
+    >
       <div className="flex items-start gap-4 pr-8">
 
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
@@ -1674,11 +1894,25 @@ function FileDetailsModal({
 
         <DetailRow
           icon={
+            <FileText className="h-4 w-4" />
+          }
+          label="Type"
+          value={
+            file.fileType ||
+            getReadableType(
+              file.type
+            )
+          }
+        />
+
+        <DetailRow
+          icon={
             <Check className="h-4 w-4" />
           }
           label="Status"
           value="Available"
         />
+
       </div>
 
       <div className="mt-6">
@@ -1686,11 +1920,8 @@ function FileDetailsModal({
         <button
           type="button"
           onClick={onDownload}
-          disabled={
-            downloading ||
-            deleting
-          }
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 disabled:opacity-60"
+          disabled={busy}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {downloading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1706,11 +1937,8 @@ function FileDetailsModal({
         <button
           type="button"
           onClick={onDelete}
-          disabled={
-            downloading ||
-            deleting
-          }
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10"
+          disabled={busy}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10"
         >
           {deleting ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1722,31 +1950,28 @@ function FileDetailsModal({
             ? "Deleting..."
             : "Delete file"}
         </button>
+
       </div>
 
-      <div className="mt-4 flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-500/10 dark:bg-blue-500/5 dark:text-blue-300">
-        <Share2 className="h-4 w-4 shrink-0" />
-
-        <span>
-          File sharing will be available
-          when the backend share API is
-          added.
-        </span>
+      <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs leading-5 text-blue-700 dark:border-blue-500/10 dark:bg-blue-500/5 dark:text-blue-300">
+        Sharing and folder organization
+        require corresponding backend APIs.
+        They are not simulated here.
       </div>
     </Modal>
   );
 }
 
-/* =====================================================
+/* =========================================================
    DETAIL ROW
-===================================================== */
+========================================================= */
 
 function DetailRow({
   icon,
   label,
   value,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   value: string;
 }) {
@@ -1758,23 +1983,24 @@ function DetailRow({
         {label}
       </div>
 
-      <span className="max-w-[180px] truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
+      <span className="max-w-[200px] truncate text-right text-xs font-semibold text-slate-700 dark:text-slate-200">
         {value}
       </span>
+
     </div>
   );
 }
 
-/* =====================================================
+/* =========================================================
    MODAL
-===================================================== */
+========================================================= */
 
 function Modal({
   children,
   onClose,
   disabled = false,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   onClose: () => void;
   disabled?: boolean;
 }) {
@@ -1783,16 +2009,15 @@ function Modal({
   ) {
     if (
       event.target ===
-      event.currentTarget
+      event.currentTarget &&
+      !disabled
     ) {
-      if (!disabled) {
-        onClose();
-      }
+      onClose();
     }
   }
 
   function handleKeyDown(
-    event: KeyboardEvent<HTMLDivElement>
+    event: ReactKeyboardEvent<HTMLDivElement>
   ) {
     if (
       event.key === "Escape" &&
@@ -1823,21 +2048,22 @@ function Modal({
             }
           }}
           disabled={disabled}
-          aria-label="Close"
+          aria-label="Close dialog"
           className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-white/10 dark:hover:text-white"
         >
           <X className="h-4 w-4" />
         </button>
 
         {children}
+
       </div>
     </div>
   );
 }
 
-/* =====================================================
+/* =========================================================
    TOAST
-===================================================== */
+========================================================= */
 
 function Toast({
   toast,
@@ -1851,13 +2077,16 @@ function Toast({
 
   return (
     <div className="fixed bottom-5 right-5 z-[60] w-[calc(100%-2rem)] max-w-sm">
+
       <div
+        role="status"
         className={`flex items-start gap-3 rounded-2xl border bg-white p-4 shadow-2xl dark:bg-slate-900 ${
           success
             ? "border-emerald-200 dark:border-emerald-500/20"
             : "border-red-200 dark:border-red-500/20"
         }`}
       >
+
         <div
           className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
             success
@@ -1873,6 +2102,7 @@ function Toast({
         </div>
 
         <div className="min-w-0 flex-1">
+
           <p className="text-sm font-semibold text-slate-900 dark:text-white">
             {success
               ? "Success"
@@ -1882,23 +2112,26 @@ function Toast({
           <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">
             {toast.message}
           </p>
+
         </div>
 
         <button
           type="button"
           onClick={onClose}
+          aria-label="Close notification"
           className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
         >
           <X className="h-4 w-4" />
         </button>
+
       </div>
     </div>
   );
 }
 
-/* =====================================================
+/* =========================================================
    HELPERS
-===================================================== */
+========================================================= */
 
 function getFileTypeFromName(
   fileName: string
@@ -1909,7 +2142,9 @@ function getFileTypeFromName(
       .pop()
       ?.toLowerCase();
 
-  if (extension === "pdf") {
+  if (
+    extension === "pdf"
+  ) {
     return "pdf";
   }
 
@@ -1923,7 +2158,10 @@ function getFileTypeFromName(
       "svg",
       "bmp",
       "heic",
-    ].includes(extension || "")
+      "avif",
+    ].includes(
+      extension || ""
+    )
   ) {
     return "image";
   }
@@ -1935,18 +2173,43 @@ function getFileTypeFromName(
       "7z",
       "tar",
       "gz",
-    ].includes(extension || "")
+      "bz2",
+    ].includes(
+      extension || ""
+    )
   ) {
     return "zip";
   }
 
-  return "document";
+  if (
+    [
+      "doc",
+      "docx",
+      "txt",
+      "rtf",
+      "odt",
+      "xls",
+      "xlsx",
+      "csv",
+      "ppt",
+      "pptx",
+    ].includes(
+      extension || ""
+    )
+  ) {
+    return "document";
+  }
+
+  return "other";
 }
 
 function formatBytes(
   bytes: number
-) {
-  if (!bytes || bytes <= 0) {
+): string {
+  if (
+    !Number.isFinite(bytes) ||
+    bytes <= 0
+  ) {
     return "0 Bytes";
   }
 
@@ -1968,7 +2231,10 @@ function formatBytes(
 
   const value =
     bytes /
-    Math.pow(1024, index);
+    Math.pow(
+      1024,
+      index
+    );
 
   return `${value.toFixed(
     index === 0
@@ -1979,11 +2245,15 @@ function formatBytes(
   )} ${units[index]}`;
 }
 
-function formatModifiedDate(
+function parseDate(
   value: unknown
-) {
-  if (!value) {
-    return "Recently";
+): Date | null {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
   }
 
   const date =
@@ -1994,43 +2264,61 @@ function formatModifiedDate(
       date.getTime()
     )
   ) {
-    return String(value);
+    return null;
   }
 
-  const now = new Date();
+  return date;
+}
+
+function formatModifiedDate(
+  value: unknown
+): string {
+  const date =
+    parseDate(value);
+
+  if (!date) {
+    return "Recently";
+  }
+
+  const now =
+    new Date();
 
   const difference =
-    now.getTime() -
-    date.getTime();
-
-  const minutes =
-    Math.floor(
-      difference / 60000
+    Math.max(
+      0,
+      now.getTime() -
+        date.getTime()
     );
 
-  const hours =
-    Math.floor(
-      difference /
-        3600000
-    );
+  const minutes = Math.floor(
+    difference / 60000
+  );
 
-  const days =
-    Math.floor(
-      difference /
-        86400000
-    );
+  const hours = Math.floor(
+    difference / 3600000
+  );
+
+  const days = Math.floor(
+    difference / 86400000
+  );
 
   if (minutes < 1) {
     return "Just now";
   }
 
   if (minutes < 60) {
-    return `${minutes} min ago`;
+    return `${minutes} min${
+      minutes === 1
+        ? ""
+        : "s"
+    } ago`;
   }
 
   if (hours < 24) {
     return `${hours} hr${
-      hours > 1 ? "s" : ""
+      hours === 1
+        ? ""
+        : "s"
     } ago`;
   }
 
@@ -2054,7 +2342,7 @@ function formatModifiedDate(
 
 function getReadableType(
   type: FileType
-) {
+): string {
   switch (type) {
     case "pdf":
       return "PDF document";
@@ -2068,7 +2356,10 @@ function getReadableType(
     case "folder":
       return "Folder";
 
-    default:
+    case "document":
       return "Document";
+
+    default:
+      return "File";
   }
 }
