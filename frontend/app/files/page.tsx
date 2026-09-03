@@ -456,6 +456,12 @@ export default function FilesPage() {
   const [deleteConfirmFile, setDeleteConfirmFile] =
     useState<FileItem | null>(null);
 
+  const [deleteConfirmFolder, setDeleteConfirmFolder] =
+    useState<FolderItem | null>(null);
+
+  const [deletingFolderId, setDeletingFolderId] =
+    useState<UUID | null>(null);
+
   /* -------------------------------------------------------
      UPLOAD
   ------------------------------------------------------- */
@@ -1174,7 +1180,7 @@ export default function FilesPage() {
 
       showToast(
         "success",
-        `"${file.fileName}" deleted successfully.`
+        `"${file.fileName}" moved to Trash successfully.`
       );
     } catch (err: any) {
       console.error(
@@ -1189,6 +1195,75 @@ export default function FilesPage() {
       );
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  /* =======================================================
+     FOLDER DELETE CONFIRMATION
+  ======================================================= */
+
+  const requestDeleteFolder = (
+    folder: FolderItem,
+    event?: MouseEvent
+  ) => {
+    event?.stopPropagation();
+
+    if (deletingId || deletingFolderId) return;
+
+    setDeleteConfirmFolder(folder);
+  };
+
+  /* =======================================================
+     FOLDER DELETE
+  ======================================================= */
+
+  const deleteFolder = async () => {
+    if (!deleteConfirmFolder) return;
+
+    const folder = deleteConfirmFolder;
+    const token = getToken();
+
+    if (!token) {
+      setDeleteConfirmFolder(null);
+      showToast("error", "Please login again.");
+      return;
+    }
+
+    setDeletingFolderId(folder.id);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/folders/${folder.id}`,
+        {
+          method: "DELETE",
+          headers: authHeaders(),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(await parseApiError(response));
+      }
+
+      setFolders((previous) =>
+        previous.filter((item) => item.id !== folder.id)
+      );
+
+      setDeleteConfirmFolder(null);
+
+      showToast(
+        "success",
+        `"${folder.name}" moved to trash successfully.`
+      );
+    } catch (err: any) {
+      console.error("Folder delete error:", err);
+
+      showToast(
+        "error",
+        err?.message ||
+          "Unable to delete folder. Please try again."
+      );
+    } finally {
+      setDeletingFolderId(null);
     }
   };
 
@@ -1676,6 +1751,13 @@ export default function FilesPage() {
                             onOpen={
                               openFolder
                             }
+                            onDelete={
+                              requestDeleteFolder
+                            }
+                            deleting={
+                              deletingFolderId ===
+                              folder.id
+                            }
                           />
                         ) : (
                           <FolderListItem
@@ -1687,6 +1769,13 @@ export default function FilesPage() {
                             }
                             onOpen={
                               openFolder
+                            }
+                            onDelete={
+                              requestDeleteFolder
+                            }
+                            deleting={
+                              deletingFolderId ===
+                              folder.id
                             }
                           />
                         )
@@ -2100,6 +2189,15 @@ export default function FilesPage() {
           DELETE CONFIRMATION MODAL
       =================================================== */}
 
+      {deleteConfirmFolder && (
+        <FolderDeleteConfirmModal
+          folder={deleteConfirmFolder}
+          deleting={Boolean(deletingFolderId)}
+          onCancel={() => setDeleteConfirmFolder(null)}
+          onConfirm={deleteFolder}
+        />
+      )}
+
       {deleteConfirmFile && (
         <DeleteConfirmModal
           file={deleteConfirmFile}
@@ -2202,6 +2300,101 @@ function Modal({
    DELETE CONFIRMATION MODAL
 ========================================================= */
 
+function FolderDeleteConfirmModal({
+  folder,
+  deleting,
+  onCancel,
+  onConfirm,
+}: {
+  folder: FolderItem;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !deleting) {
+          onCancel();
+        }
+      }}
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-folder-title"
+      >
+        <div className="flex justify-center pt-7">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400">
+            <Trash2 size={25} />
+          </div>
+        </div>
+
+        <div className="px-6 pb-5 pt-5 text-center">
+          <h2
+            id="delete-folder-title"
+            className="text-lg font-bold text-slate-900 dark:text-white"
+          >
+            Move folder to Trash?
+          </h2>
+
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
+            The folder will be moved to Trash. You can restore it later.
+          </p>
+
+          <div className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
+              <FolderOpen size={21} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p
+                className="truncate text-sm font-semibold text-slate-900 dark:text-white"
+                title={folder.name}
+              >
+                {folder.name}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Folder
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900/50">
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={onCancel}
+            className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={onConfirm}
+            className="inline-flex min-w-[125px] items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deleting ? (
+              <>
+                <Loader2 size={17} className="animate-spin" />
+                Moving...
+              </>
+            ) : (
+              <>
+                <Trash2 size={17} />
+                Move to Trash
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DeleteConfirmModal({
   file,
   deleting,
@@ -2242,13 +2435,12 @@ function DeleteConfirmModal({
             id="delete-file-title"
             className="text-lg font-bold text-slate-900 dark:text-white"
           >
-            Delete file?
+            Move file to Trash?
           </h2>
 
           <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
-            Are you sure you want to permanently
-            delete this file? This action cannot
-            be undone.
+            Are you sure you want to move this file to Trash?
+            You can restore it later.
           </p>
 
           <div className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left dark:border-slate-800 dark:bg-slate-900">
@@ -2315,43 +2507,55 @@ function DeleteConfirmModal({
 function FolderCard({
   folder,
   onOpen,
+  onDelete,
+  deleting,
 }: {
   folder: FolderItem;
   onOpen: (folder: FolderItem) => void;
+  onDelete: (folder: FolderItem, event?: MouseEvent) => void;
+  deleting: boolean;
 }) {
   return (
-    <button
-      onDoubleClick={() =>
-        onOpen(folder)
-      }
-      onClick={() =>
-        onOpen(folder)
-      }
-      className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700"
-    >
+    <div className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700">
       <div className="flex items-start justify-between">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          <FolderOpen
-            size={25}
-          />
-        </div>
+        <button
+          type="button"
+          onClick={() => onOpen(folder)}
+          className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          title={`Open ${folder.name}`}
+        >
+          <FolderOpen size={25} />
+        </button>
 
-        <MoreHorizontal
-          size={18}
-          className="text-slate-300 dark:text-slate-600"
-        />
+        <button
+          type="button"
+          disabled={deleting}
+          onClick={(event) => onDelete(folder, event)}
+          className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-500 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+          title="Delete folder"
+          aria-label={`Delete ${folder.name}`}
+        >
+          {deleting ? (
+            <Loader2 size={18} className="animate-spin" />
+          ) : (
+            <Trash2 size={18} />
+          )}
+        </button>
       </div>
 
-      <div className="mt-4">
+      <button
+        type="button"
+        onClick={() => onOpen(folder)}
+        className="mt-4 block w-full text-left"
+      >
         <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
           {folder.name}
         </p>
-
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
           Folder
         </p>
-      </div>
-    </button>
+      </button>
+    </div>
   );
 }
 
@@ -2362,36 +2566,52 @@ function FolderCard({
 function FolderListItem({
   folder,
   onOpen,
+  onDelete,
+  deleting,
 }: {
   folder: FolderItem;
   onOpen: (folder: FolderItem) => void;
+  onDelete: (folder: FolderItem, event?: MouseEvent) => void;
+  deleting: boolean;
 }) {
   return (
-    <button
-      onClick={() =>
-        onOpen(folder)
-      }
-      className="flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/70"
-    >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-        <Folder size={21} />
-      </div>
+    <div className="flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/70">
+      <button
+        type="button"
+        onClick={() => onOpen(folder)}
+        className="flex min-w-0 flex-1 items-center gap-4 text-left"
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <Folder size={21} />
+        </div>
 
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-          {folder.name}
-        </p>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+            {folder.name}
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Folder
+          </p>
+        </div>
+      </button>
 
-        <p className="text-xs text-slate-500">
-          Folder
-        </p>
-      </div>
+      <button
+        type="button"
+        disabled={deleting}
+        onClick={(event) => onDelete(folder, event)}
+        className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-500 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+        title="Delete folder"
+        aria-label={`Delete ${folder.name}`}
+      >
+        {deleting ? (
+          <Loader2 size={18} className="animate-spin" />
+        ) : (
+          <Trash2 size={18} />
+        )}
+      </button>
 
-      <ChevronRight
-        size={18}
-        className="text-slate-400"
-      />
-    </button>
+      <ChevronRight size={18} className="shrink-0 text-slate-400" />
+    </div>
   );
 }
 
