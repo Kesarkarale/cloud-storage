@@ -10,6 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.nio.file.*;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -41,6 +42,10 @@ public class FileService {
             );
         }
     }
+
+    // =========================
+    // UPLOAD FILE
+    // =========================
 
     public File uploadFile(
             MultipartFile multipartFile,
@@ -104,6 +109,7 @@ public class FileService {
                     ).normalize();
 
             if (!targetPath.startsWith(uploadDirectory)) {
+
                 throw new RuntimeException(
                         "Invalid file path"
                 );
@@ -139,6 +145,9 @@ public class FileService {
                     parentFolderId
             );
 
+            file.setDeleted(false);
+            file.setDeletedAt(null);
+
             return fileRepository.save(file);
 
         } catch (IOException e) {
@@ -150,6 +159,10 @@ public class FileService {
         }
     }
 
+    // =========================
+    // GET ACTIVE FILES
+    // =========================
+
     public List<File> getFiles(
             UUID userId,
             UUID parentFolderId
@@ -158,17 +171,21 @@ public class FileService {
         if (parentFolderId == null) {
 
             return fileRepository
-                    .findByUserIdAndParentFolderIdIsNull(
+                    .findByUserIdAndDeletedFalseAndParentFolderIdIsNull(
                             userId
                     );
         }
 
         return fileRepository
-                .findByUserIdAndParentFolderId(
+                .findByUserIdAndDeletedFalseAndParentFolderId(
                         userId,
                         parentFolderId
                 );
     }
+
+    // =========================
+    // GET FILE
+    // =========================
 
     public File getFile(
             UUID fileId,
@@ -190,8 +207,19 @@ public class FileService {
             );
         }
 
+        if (file.isDeleted()) {
+
+            throw new RuntimeException(
+                    "File is in trash"
+            );
+        }
+
         return file;
     }
+
+    // =========================
+    // MOVE FILE TO TRASH
+    // =========================
 
     public void deleteFile(
             UUID fileId,
@@ -199,27 +227,160 @@ public class FileService {
     ) {
 
         File file =
-                getFile(
-                        fileId,
+                fileRepository.findById(fileId)
+                        .orElseThrow(() ->
+                                new RuntimeException(
+                                        "File not found"
+                                )
+                        );
+
+        if (!file.getUserId().equals(userId)) {
+
+            throw new RuntimeException(
+                    "You are not allowed to delete this file"
+            );
+        }
+
+        if (file.isDeleted()) {
+
+            throw new RuntimeException(
+                    "File is already in trash"
+            );
+        }
+
+        // IMPORTANT:
+        // Physical file is NOT deleted here.
+        // Only marked as deleted.
+
+        file.setDeleted(true);
+        file.setDeletedAt(
+                LocalDateTime.now()
+        );
+
+        fileRepository.save(file);
+    }
+
+    // =========================
+    // GET TRASH
+    // =========================
+
+    public List<File> getTrashFiles(
+            UUID userId
+    ) {
+
+        return fileRepository
+                .findByUserIdAndDeletedTrue(
                         userId
                 );
+    }
+
+    // =========================
+    // RESTORE FILE
+    // =========================
+
+    public void restoreFile(
+            UUID fileId,
+            UUID userId
+    ) {
+
+        File file =
+                fileRepository
+                        .findByIdAndUserIdAndDeletedTrue(
+                                fileId,
+                                userId
+                        )
+                        .orElseThrow(() ->
+                                new RuntimeException(
+                                        "Trashed file not found"
+                                )
+                        );
+
+        // Restore file
+        file.setDeleted(false);
+        file.setDeletedAt(null);
+
+        fileRepository.save(file);
+    }
+
+    // =========================
+    // PERMANENT DELETE
+    // =========================
+
+    public void permanentlyDeleteFile(
+            UUID fileId,
+            UUID userId
+    ) {
+
+        File file =
+                fileRepository
+                        .findByIdAndUserIdAndDeletedTrue(
+                                fileId,
+                                userId
+                        )
+                        .orElseThrow(() ->
+                                new RuntimeException(
+                                        "Trashed file not found"
+                                )
+                        );
 
         try {
 
+            // Delete physical file
             Files.deleteIfExists(
                     Paths.get(
                             file.getFilePath()
                     )
             );
 
+            // Delete database record
             fileRepository.delete(file);
 
         } catch (IOException e) {
 
             throw new RuntimeException(
-                    "File deletion failed",
+                    "Permanent file deletion failed",
                     e
             );
         }
+    }
+
+    // =========================
+    // EMPTY TRASH
+    // =========================
+
+    public void emptyTrash(
+            UUID userId
+    ) {
+
+        List<File> trashFiles =
+                fileRepository
+                        .findByUserIdAndDeletedTrue(
+                                userId
+                        );
+
+        for (File file : trashFiles) {
+
+            try {
+
+                Files.deleteIfExists(
+                        Paths.get(
+                                file.getFilePath()
+                        )
+                );
+
+            } catch (IOException e) {
+
+                throw new RuntimeException(
+                        "Could not delete physical file: "
+                                + file.getFileName(),
+                        e
+                );
+            }
+        }
+
+        // Delete all DB records
+        fileRepository.deleteAll(
+                trashFiles
+        );
     }
 }
