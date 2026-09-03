@@ -18,4 +18,25 @@ public interface FileRepository extends JpaRepository<File, UUID> {
     List<File> findByUserIdAndParentFolderIdIsNull(
             UUID userId
     );
+
+    // Only active files
+    List<File> findByUserIdAndDeletedFalseAndParentFolderId(
+            UUID userId,
+            UUID parentFolderId
+    );
+
+    List<File> findByUserIdAndDeletedFalseAndParentFolderIdIsNull(
+            UUID userId
+    );
+
+    // Trash files
+    List<File> findByUserIdAndDeletedTrue(
+            UUID userId
+    );
+
+    // Find a specific trashed file
+    java.util.Optional<File> findByIdAndUserIdAndDeletedTrue(
+            UUID fileId,
+            UUID userId
+    );
 }
