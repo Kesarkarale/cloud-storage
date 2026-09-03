@@ -21,8 +21,10 @@ import {
   Trash2,
   Upload,
   X,
+  ZoomIn,
 } from "lucide-react";
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -47,12 +49,21 @@ type FileItem = {
   type: FileType;
   size: string;
   modified: string;
+  parentId: number | null;
 
   /*
-   * parentId tells us which folder this item belongs to.
-   * null = root / My Files
+   * Used for local image preview.
+   *
+   * Later when connected with Spring Boot,
+   * this can contain your real storage URL.
    */
-  parentId: number | null;
+  previewUrl?: string;
+
+  /*
+   * Original File object.
+   * Useful for downloading locally uploaded files.
+   */
+  fileObject?: File;
 };
 
 /* =========================================================
@@ -132,9 +143,9 @@ const initialFiles: FileItem[] = [
     parentId: null,
   },
 
-  /*
-   * Demo files INSIDE Documents
-   */
+  /* =======================================================
+     DEMO FILES INSIDE DOCUMENTS
+  ======================================================= */
 
   {
     id: 9,
@@ -163,9 +174,9 @@ const initialFiles: FileItem[] = [
     parentId: 1,
   },
 
-  /*
-   * Demo files INSIDE Project Images
-   */
+  /* =======================================================
+     DEMO FILES INSIDE PROJECT IMAGES
+  ======================================================= */
 
   {
     id: 12,
@@ -185,9 +196,9 @@ const initialFiles: FileItem[] = [
     parentId: 4,
   },
 
-  /*
-   * Nested folder
-   */
+  /* =======================================================
+     NESTED FOLDER
+  ======================================================= */
 
   {
     id: 14,
@@ -226,15 +237,13 @@ export default function FilesPage() {
     useState("recent");
 
   /*
-   * currentFolderId
-   *
-   * null = My Files / root
+   * null = root / My Files
    */
   const [currentFolderId, setCurrentFolderId] =
     useState<number | null>(null);
 
   /*
-   * Folder navigation history
+   * Navigation history
    */
   const [folderHistory, setFolderHistory] =
     useState<number[]>([]);
@@ -248,11 +257,39 @@ export default function FilesPage() {
   const [folderName, setFolderName] =
     useState("");
 
+  /*
+   * Details modal
+   */
   const [selectedFile, setSelectedFile] =
+    useState<FileItem | null>(null);
+
+  /*
+   * Image preview modal
+   */
+  const [previewImage, setPreviewImage] =
     useState<FileItem | null>(null);
 
   const fileInputRef =
     useRef<HTMLInputElement>(null);
+
+  /* =======================================================
+     CLEANUP OBJECT URLS
+  ======================================================= */
+
+  useEffect(() => {
+    return () => {
+      files.forEach((file) => {
+        if (
+          file.previewUrl &&
+          file.previewUrl.startsWith("blob:")
+        ) {
+          URL.revokeObjectURL(
+            file.previewUrl
+          );
+        }
+      });
+    };
+  }, []);
 
   /* =======================================================
      CURRENT FOLDER
@@ -294,28 +331,6 @@ export default function FilesPage() {
         .includes(search.toLowerCase())
     );
 
-    /*
-     * Always keep folders above files.
-     * This feels more like File Explorer / Google Drive.
-     */
-    result.sort((a, b) => {
-      if (
-        a.type === "folder" &&
-        b.type !== "folder"
-      ) {
-        return -1;
-      }
-
-      if (
-        a.type !== "folder" &&
-        b.type === "folder"
-      ) {
-        return 1;
-      }
-
-      return 0;
-    });
-
     if (sortBy === "name") {
       result = [...result].sort((a, b) =>
         a.name.localeCompare(b.name)
@@ -323,27 +338,21 @@ export default function FilesPage() {
     }
 
     if (sortBy === "size") {
-      result = [...result].sort((a, b) =>
-        getSizeInBytes(a.size) -
-        getSizeInBytes(b.size)
+      result = [...result].sort(
+        (a, b) =>
+          getSizeInBytes(a.size) -
+          getSizeInBytes(b.size)
       );
     }
 
-    /*
-     * Recent is default order.
-     * Newest items are already inserted at top.
-     */
     if (sortBy === "recent") {
       result = [...result].sort(
         (a, b) => b.id - a.id
       );
-    }
 
-    /*
-     * Folders should still remain at top
-     * for recent sorting.
-     */
-    if (sortBy !== "name" && sortBy !== "size") {
+      /*
+       * Keep folders above files.
+       */
       result = [...result].sort((a, b) => {
         if (
           a.type === "folder" &&
@@ -359,7 +368,7 @@ export default function FilesPage() {
           return 1;
         }
 
-        return b.id - a.id;
+        return 0;
       });
     }
 
@@ -382,10 +391,6 @@ export default function FilesPage() {
       return;
     }
 
-    /*
-     * Prevent duplicate folder names
-     * inside the same folder.
-     */
     const duplicate = files.some(
       (file) =>
         file.parentId === currentFolderId &&
@@ -420,7 +425,7 @@ export default function FilesPage() {
   }
 
   /* =======================================================
-     UPLOAD
+     UPLOAD FILES
   ======================================================= */
 
   function handleFileUpload(
@@ -438,22 +443,33 @@ export default function FilesPage() {
 
     const uploadedFiles: FileItem[] =
       Array.from(selected).map(
-        (file, index) => ({
-          id: Date.now() + index,
-          name: file.name,
-          type: getFileType(file.name),
-          size: formatFileSize(
-            file.size
-          ),
-          modified: "Just now",
+        (file, index) => {
+          const type =
+            getFileType(file.name);
 
           /*
-           * IMPORTANT:
-           * Upload goes inside the
-           * currently opened folder.
+           * Create preview URL ONLY for images.
            */
-          parentId: currentFolderId,
-        })
+          const previewUrl =
+            type === "image"
+              ? URL.createObjectURL(file)
+              : undefined;
+
+          return {
+            id:
+              Date.now() + index,
+            name: file.name,
+            type,
+            size: formatFileSize(
+              file.size
+            ),
+            modified: "Just now",
+            parentId:
+              currentFolderId,
+            previewUrl,
+            fileObject: file,
+          };
+        }
       );
 
     setFiles((current) => [
@@ -469,45 +485,101 @@ export default function FilesPage() {
   }
 
   /* =======================================================
-     OPEN FOLDER
+     OPEN FILE / FOLDER
   ======================================================= */
 
-  function openFolder(folder: FileItem) {
-    if (folder.type !== "folder") {
-      setSelectedFile(folder);
+  function handleFileClick(
+    file: FileItem
+  ) {
+    /*
+     * Folder -> open folder
+     */
+    if (file.type === "folder") {
+      openFolder(file);
       return;
     }
 
     /*
-     * Save current folder in history
-     * before moving inside.
+     * Image -> image preview
      */
-    if (currentFolderId !== null) {
-      setFolderHistory((history) => [
-        ...history,
-        currentFolderId,
-      ]);
+    if (file.type === "image") {
+      setPreviewImage(file);
+      return;
     }
 
-    setCurrentFolderId(folder.id);
+    /*
+     * Other files -> details modal
+     */
+    setSelectedFile(file);
+  }
+
+  /* =======================================================
+     OPEN FOLDER
+  ======================================================= */
+
+  function openFolder(
+    folder: FileItem
+  ) {
+    if (folder.type !== "folder") {
+      return;
+    }
+
+    if (currentFolderId !== null) {
+      setFolderHistory(
+        (history) => [
+          ...history,
+          currentFolderId,
+        ]
+      );
+    }
+
+    setCurrentFolderId(
+      folder.id
+    );
 
     setSearch("");
 
     setSelectedFile(null);
+    setPreviewImage(null);
   }
 
   /* =======================================================
-     GO BACK
+     DOUBLE CLICK
+  ======================================================= */
+
+  function handleDoubleClick(
+    file: FileItem
+  ) {
+    /*
+     * For folders double click also opens.
+     *
+     * For images double click preview.
+     */
+    if (file.type === "folder") {
+      openFolder(file);
+      return;
+    }
+
+    if (file.type === "image") {
+      setPreviewImage(file);
+    }
+  }
+
+  /* =======================================================
+     BACK
   ======================================================= */
 
   function goBack() {
-    if (folderHistory.length === 0) {
+    if (
+      folderHistory.length === 0
+    ) {
       setCurrentFolderId(null);
       return;
     }
 
-    const history =
-      [...folderHistory];
+    const history = [
+      ...folderHistory,
+    ];
 
     const previousFolderId =
       history.pop() ?? null;
@@ -519,12 +591,12 @@ export default function FilesPage() {
     );
 
     setSearch("");
-
     setSelectedFile(null);
+    setPreviewImage(null);
   }
 
   /* =======================================================
-     GO HOME
+     HOME
   ======================================================= */
 
   function goHome() {
@@ -532,6 +604,7 @@ export default function FilesPage() {
     setFolderHistory([]);
     setSearch("");
     setSelectedFile(null);
+    setPreviewImage(null);
   }
 
   /* =======================================================
@@ -539,29 +612,54 @@ export default function FilesPage() {
   ======================================================= */
 
   function deleteFile(id: number) {
+    const itemToDelete =
+      files.find(
+        (file) => file.id === id
+      );
+
     /*
-     * Delete the selected item and
-     * everything inside it if it is
-     * a folder.
+     * Revoke image URL before deleting.
      */
+    if (
+      itemToDelete?.previewUrl &&
+      itemToDelete.previewUrl.startsWith(
+        "blob:"
+      )
+    ) {
+      URL.revokeObjectURL(
+        itemToDelete.previewUrl
+      );
+    }
+
     setFiles((current) => {
-      const idsToDelete = new Set<number>();
+      const idsToDelete =
+        new Set<number>();
 
       function collectChildren(
         parentId: number
       ) {
-        idsToDelete.add(parentId);
+        idsToDelete.add(
+          parentId
+        );
 
         current
           .filter(
             (file) =>
-              file.parentId === parentId
+              file.parentId ===
+              parentId
           )
           .forEach((child) => {
-            if (child.type === "folder") {
-              collectChildren(child.id);
+            if (
+              child.type ===
+              "folder"
+            ) {
+              collectChildren(
+                child.id
+              );
             } else {
-              idsToDelete.add(child.id);
+              idsToDelete.add(
+                child.id
+              );
             }
           });
       }
@@ -570,30 +668,78 @@ export default function FilesPage() {
 
       return current.filter(
         (file) =>
-          !idsToDelete.has(file.id)
+          !idsToDelete.has(
+            file.id
+          )
       );
     });
 
-    /*
-     * If deleted item is current folder,
-     * go back to parent.
-     */
-    if (id === currentFolderId) {
-      goBack();
-    }
-
     setSelectedFile(null);
+    setPreviewImage(null);
   }
 
   /* =======================================================
-     DOUBLE CLICK
+     DOWNLOAD LOCAL FILE
   ======================================================= */
 
-  function handleDoubleClick(
+  function downloadFile(
     file: FileItem
   ) {
-    if (file.type === "folder") {
-      openFolder(file);
+    /*
+     * If actual File object exists,
+     * download it locally.
+     */
+    if (file.fileObject) {
+      const url =
+        URL.createObjectURL(
+          file.fileObject
+        );
+
+      const link =
+        document.createElement(
+          "a"
+        );
+
+      link.href = url;
+      link.download =
+        file.name;
+
+      document.body.appendChild(
+        link
+      );
+
+      link.click();
+
+      link.remove();
+
+      URL.revokeObjectURL(url);
+
+      return;
+    }
+
+    /*
+     * If preview URL exists,
+     * download from it.
+     */
+    if (file.previewUrl) {
+      const link =
+        document.createElement(
+          "a"
+        );
+
+      link.href =
+        file.previewUrl;
+
+      link.download =
+        file.name;
+
+      document.body.appendChild(
+        link
+      );
+
+      link.click();
+
+      link.remove();
     }
   }
 
@@ -601,57 +747,74 @@ export default function FilesPage() {
      BREADCRUMB
   ======================================================= */
 
-  const breadcrumb = useMemo(() => {
-    const result: FileItem[] = [];
+  const breadcrumb =
+    useMemo(() => {
+      const result: FileItem[] =
+        [];
 
-    let folder =
-      currentFolder;
+      let folder =
+        currentFolder;
 
-    while (folder) {
-      result.unshift(folder);
+      while (folder) {
+        result.unshift(
+          folder
+        );
 
-      folder =
-        files.find(
-          (file) =>
-            file.id ===
-            folder?.parentId &&
-            file.type === "folder"
-        ) ?? null;
-    }
+        folder =
+          files.find(
+            (file) =>
+              file.id ===
+                folder?.parentId &&
+              file.type ===
+                "folder"
+          ) ?? null;
+      }
 
-    return result;
-  }, [
-    currentFolder,
-    files,
-  ]);
+      return result;
+    }, [
+      currentFolder,
+      files,
+    ]);
 
   /* =======================================================
      STORAGE
   ======================================================= */
 
   const totalStorageBytes =
-    10 * 1024 * 1024 * 1024;
+    10 *
+    1024 *
+    1024 *
+    1024;
 
   const usedStorageBytes =
-    files.reduce((total, file) => {
-      if (file.type === "folder") {
-        return total;
-      }
+    files.reduce(
+      (total, file) => {
+        if (
+          file.type ===
+          "folder"
+        ) {
+          return total;
+        }
 
-      return (
-        total +
-        getSizeInBytes(file.size)
-      );
-    }, 0);
+        return (
+          total +
+          getSizeInBytes(
+            file.size
+          )
+        );
+      },
+      0
+    );
 
-  const usedPercentage = Math.min(
-    100,
-    Math.round(
-      (usedStorageBytes /
-        totalStorageBytes) *
-        100
-    )
-  );
+  const usedPercentage =
+    Math.min(
+      100,
+      Math.round(
+        (usedStorageBytes /
+          totalStorageBytes) *
+          100
+      )
+    );
 
   /* =======================================================
      RENDER
@@ -677,6 +840,7 @@ export default function FilesPage() {
               <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
                 Cloud Storage
               </span>
+
             </div>
 
             <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-4xl">
@@ -741,6 +905,7 @@ export default function FilesPage() {
                   used of 10 GB
                 </p>
               </div>
+
             </div>
 
             <div className="w-full sm:max-w-sm">
@@ -753,8 +918,11 @@ export default function FilesPage() {
 
                 <span className="font-medium text-slate-600 dark:text-slate-300">
                   {formatStorage(
-                    totalStorageBytes -
-                      usedStorageBytes
+                    Math.max(
+                      0,
+                      totalStorageBytes -
+                        usedStorageBytes
+                    )
                   )}{" "}
                   free
                 </span>
@@ -772,6 +940,7 @@ export default function FilesPage() {
 
               </div>
             </div>
+
           </div>
         </div>
 
@@ -790,7 +959,9 @@ export default function FilesPage() {
             <input
               value={search}
               onChange={(e) =>
-                setSearch(e.target.value)
+                setSearch(
+                  e.target.value
+                )
               }
               placeholder="Search files and folders..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
@@ -807,11 +978,12 @@ export default function FilesPage() {
               <select
                 value={sortBy}
                 onChange={(e) =>
-                  setSortBy(e.target.value)
+                  setSortBy(
+                    e.target.value
+                  )
                 }
                 className="h-11 appearance-none rounded-xl border border-slate-200 bg-white px-4 pr-9 text-sm font-medium text-slate-700 outline-none dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
               >
-
                 <option value="recent">
                   Recently Modified
                 </option>
@@ -823,7 +995,6 @@ export default function FilesPage() {
                 <option value="size">
                   Size
                 </option>
-
               </select>
 
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -866,12 +1037,10 @@ export default function FilesPage() {
         </div>
 
         {/* =================================================
-            NAVIGATION / BREADCRUMB
+            BREADCRUMB
         ================================================= */}
 
         <div className="mt-6 flex flex-wrap items-center gap-2">
-
-          {/* BACK */}
 
           {currentFolderId !== null && (
             <button
@@ -883,12 +1052,11 @@ export default function FilesPage() {
             </button>
           )}
 
-          {/* HOME */}
-
           <button
             onClick={goHome}
             className={`inline-flex items-center gap-2 text-sm font-semibold transition ${
-              currentFolderId === null
+              currentFolderId ===
+              null
                 ? "text-slate-900 dark:text-white"
                 : "text-blue-600 hover:text-blue-700 dark:text-blue-400"
             }`}
@@ -909,10 +1077,6 @@ export default function FilesPage() {
 
                 <button
                   onClick={() => {
-                    /*
-                     * Navigate directly to
-                     * breadcrumb folder.
-                     */
                     const indexInPath =
                       breadcrumb.findIndex(
                         (item) =>
@@ -943,10 +1107,14 @@ export default function FilesPage() {
                     setSelectedFile(
                       null
                     );
+                    setPreviewImage(
+                      null
+                    );
                   }}
                   className={`max-w-[180px] truncate text-sm ${
                     index ===
-                    breadcrumb.length - 1
+                    breadcrumb.length -
+                      1
                       ? "font-semibold text-slate-900 dark:text-white"
                       : "font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
                   }`}
@@ -960,7 +1128,7 @@ export default function FilesPage() {
         </div>
 
         {/* =================================================
-            CURRENT FOLDER TITLE
+            CURRENT FOLDER HEADER
         ================================================= */}
 
         {currentFolder && (
@@ -977,7 +1145,8 @@ export default function FilesPage() {
 
               <p className="text-xs text-slate-400">
                 {currentFiles.length}{" "}
-                {currentFiles.length === 1
+                {currentFiles.length ===
+                1
                   ? "item"
                   : "items"}
               </p>
@@ -990,7 +1159,8 @@ export default function FilesPage() {
             FILE AREA
         ================================================= */}
 
-        {filteredFiles.length === 0 ? (
+        {filteredFiles.length ===
+        0 ? (
           <EmptyState
             search={search}
             onUpload={() =>
@@ -1009,18 +1179,11 @@ export default function FilesPage() {
                 <FileCard
                   key={file.id}
                   file={file}
-                  onClick={() => {
-                    if (
-                      file.type ===
-                      "folder"
-                    ) {
-                      openFolder(file);
-                    } else {
-                      setSelectedFile(
-                        file
-                      );
-                    }
-                  }}
+                  onClick={() =>
+                    handleFileClick(
+                      file
+                    )
+                  }
                   onDoubleClick={() =>
                     handleDoubleClick(
                       file
@@ -1048,18 +1211,11 @@ export default function FilesPage() {
                 <ListFile
                   key={file.id}
                   file={file}
-                  onClick={() => {
-                    if (
-                      file.type ===
-                      "folder"
-                    ) {
-                      openFolder(file);
-                    } else {
-                      setSelectedFile(
-                        file
-                      );
-                    }
-                  }}
+                  onClick={() =>
+                    handleFileClick(
+                      file
+                    )
+                  }
                   onDoubleClick={() =>
                     handleDoubleClick(
                       file
@@ -1073,18 +1229,26 @@ export default function FilesPage() {
         )}
 
         {/* =================================================
-            MODALS
+            UPLOAD MODAL
         ================================================= */}
 
         {showUpload && (
           <UploadModal
-            inputRef={fileInputRef}
+            inputRef={
+              fileInputRef
+            }
             onClose={() =>
               setShowUpload(false)
             }
-            onUpload={handleFileUpload}
+            onUpload={
+              handleFileUpload
+            }
           />
         )}
+
+        {/* =================================================
+            FOLDER MODAL
+        ================================================= */}
 
         {showFolder && (
           <FolderModal
@@ -1093,9 +1257,15 @@ export default function FilesPage() {
             onClose={() =>
               setShowFolder(false)
             }
-            onCreate={createFolder}
+            onCreate={
+              createFolder
+            }
           />
         )}
+
+        {/* =================================================
+            FILE DETAILS
+        ================================================= */}
 
         {selectedFile && (
           <FileDetailsModal
@@ -1106,6 +1276,34 @@ export default function FilesPage() {
             onDelete={() =>
               deleteFile(
                 selectedFile.id
+              )
+            }
+            onDownload={() =>
+              downloadFile(
+                selectedFile
+              )
+            }
+          />
+        )}
+
+        {/* =================================================
+            IMAGE PREVIEW
+        ================================================= */}
+
+        {previewImage && (
+          <ImagePreviewModal
+            file={previewImage}
+            onClose={() =>
+              setPreviewImage(null)
+            }
+            onDownload={() =>
+              downloadFile(
+                previewImage
+              )
+            }
+            onDelete={() =>
+              deleteFile(
+                previewImage.id
               )
             }
           />
@@ -1129,54 +1327,90 @@ function FileCard({
   onClick: () => void;
   onDoubleClick: () => void;
 }) {
-  const folder =
+  const isFolder =
     file.type === "folder";
+
+  const isImage =
+    file.type === "image";
 
   return (
     <button
       onClick={onClick}
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={
+        onDoubleClick
+      }
       className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/30"
     >
-      <div className="flex items-start justify-between">
 
-        <div
-          className={`flex h-12 w-12 items-center justify-center rounded-xl ${
-            folder
-              ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
-              : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"
-          }`}
-        >
-          <FileIcon
-            type={file.type}
+      {/* IMAGE PREVIEW */}
+
+      {isImage &&
+      file.previewUrl ? (
+        <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-slate-100 dark:bg-white/5">
+
+          <img
+            src={file.previewUrl}
+            alt={file.name}
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
           />
+
+          <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition group-hover:bg-black/20">
+            <div className="scale-75 rounded-full bg-white/90 p-3 opacity-0 shadow-lg transition group-hover:scale-100 group-hover:opacity-100">
+              <ZoomIn className="h-5 w-5 text-slate-800" />
+            </div>
+          </div>
+
         </div>
+      ) : (
 
-        <MoreHorizontal className="h-5 w-5 text-slate-300 transition group-hover:text-slate-500 dark:text-slate-600 dark:group-hover:text-slate-300" />
+        <div className="flex items-start justify-between">
 
-      </div>
+          <div
+            className={`flex h-12 w-12 items-center justify-center rounded-xl ${
+              isFolder
+                ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
+                : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"
+            }`}
+          >
+            <FileIcon
+              type={file.type}
+            />
+          </div>
 
-      <div className="mt-5">
+          <MoreHorizontal className="h-5 w-5 text-slate-300 transition group-hover:text-slate-500 dark:text-slate-600 dark:group-hover:text-slate-300" />
+
+        </div>
+      )}
+
+      <div
+        className={
+          isImage &&
+          file.previewUrl
+            ? "mt-4"
+            : "mt-5"
+        }
+      >
 
         <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
           {file.name}
         </p>
 
-        <div className="mt-2 flex items-center justify-between">
+        <div className="mt-2 flex items-center justify-between gap-2">
 
-          <span className="text-xs text-slate-400">
-            {folder
+          <span className="truncate text-xs text-slate-400">
+            {isFolder
               ? "Folder"
               : file.size}
           </span>
 
-          <span className="text-xs text-slate-400">
+          <span className="shrink-0 text-xs text-slate-400">
             {file.modified}
           </span>
 
         </div>
 
       </div>
+
     </button>
   );
 }
@@ -1194,26 +1428,48 @@ function ListFile({
   onClick: () => void;
   onDoubleClick: () => void;
 }) {
+  const isImage =
+    file.type === "image";
+
+  const isFolder =
+    file.type === "folder";
+
   return (
     <button
       onClick={onClick}
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={
+        onDoubleClick
+      }
       className="grid w-full gap-3 border-b border-slate-100 px-5 py-4 text-left transition last:border-0 hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5 md:grid-cols-[1fr_140px_160px_50px] md:items-center md:gap-4"
     >
 
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
 
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-            file.type === "folder"
-              ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
-              : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"
-          }`}
-        >
-          <FileIcon
-            type={file.type}
-          />
-        </div>
+        {isImage &&
+        file.previewUrl ? (
+          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl bg-slate-100 dark:bg-white/10">
+
+            <img
+              src={file.previewUrl}
+              alt={file.name}
+              className="h-full w-full object-cover"
+            />
+
+          </div>
+        ) : (
+
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+              isFolder
+                ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
+                : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"
+            }`}
+          >
+            <FileIcon
+              type={file.type}
+            />
+          </div>
+        )}
 
         <span className="truncate text-sm font-semibold text-slate-800 dark:text-white">
           {file.name}
@@ -1222,7 +1478,7 @@ function ListFile({
       </div>
 
       <span className="hidden text-xs text-slate-400 md:block">
-        {file.type === "folder"
+        {isFolder
           ? "—"
           : file.size}
       </span>
@@ -1379,7 +1635,7 @@ function UploadModal({
           Click to choose files
 
           <span className="mt-2 block text-xs font-normal text-slate-400">
-            You can select multiple files
+            Images, PDF, documents, ZIP and more
           </span>
         </button>
 
@@ -1392,6 +1648,7 @@ function UploadModal({
         />
 
       </div>
+
     </Modal>
   );
 }
@@ -1407,7 +1664,9 @@ function FolderModal({
   onCreate,
 }: {
   value: string;
-  setValue: (value: string) => void;
+  setValue: (
+    value: string
+  ) => void;
   onClose: () => void;
   onCreate: () => void;
 }) {
@@ -1436,10 +1695,15 @@ function FolderModal({
         autoFocus
         value={value}
         onChange={(e) =>
-          setValue(e.target.value)
+          setValue(
+            e.target.value
+          )
         }
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
+          if (
+            e.key ===
+            "Enter"
+          ) {
             onCreate();
           }
         }}
@@ -1471,17 +1735,19 @@ function FolderModal({
 }
 
 /* =========================================================
-   FILE DETAILS
+   FILE DETAILS MODAL
 ========================================================= */
 
 function FileDetailsModal({
   file,
   onClose,
   onDelete,
+  onDownload,
 }: {
   file: FileItem;
   onClose: () => void;
   onDelete: () => void;
+  onDownload: () => void;
 }) {
   const isFolder =
     file.type === "folder";
@@ -1512,7 +1778,9 @@ function FileDetailsModal({
             </p>
 
           </div>
+
         </div>
+
       </div>
 
       <div className="mt-6 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
@@ -1547,6 +1815,7 @@ function FileDetailsModal({
         <div className="mt-6 grid grid-cols-2 gap-3">
 
           <button
+            onClick={onDownload}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
           >
             <Download className="h-4 w-4" />
@@ -1572,6 +1841,139 @@ function FileDetailsModal({
       </button>
 
     </Modal>
+  );
+}
+
+/* =========================================================
+   IMAGE PREVIEW MODAL
+========================================================= */
+
+function ImagePreviewModal({
+  file,
+  onClose,
+  onDownload,
+  onDelete,
+}: {
+  file: FileItem;
+  onClose: () => void;
+  onDownload: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"
+      onMouseDown={(event) => {
+        if (
+          event.target ===
+          event.currentTarget
+        ) {
+          onClose();
+        }
+      }}
+    >
+
+      <div className="relative flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl">
+
+        {/* =================================================
+            PREVIEW HEADER
+        ================================================= */}
+
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 sm:px-5">
+
+          <div className="flex min-w-0 items-center gap-3">
+
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10">
+              <FileImage className="h-4 w-4 text-white" />
+            </div>
+
+            <div className="min-w-0">
+
+              <p className="truncate text-sm font-semibold text-white">
+                {file.name}
+              </p>
+
+              <p className="text-xs text-slate-400">
+                {file.size}
+              </p>
+
+            </div>
+
+          </div>
+
+          <button
+            onClick={onClose}
+            className="ml-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/10 hover:text-white"
+          >
+            <X className="h-5 w-5" />
+          </button>
+
+        </div>
+
+        {/* =================================================
+            IMAGE
+        ================================================= */}
+
+        <div className="flex min-h-[300px] flex-1 items-center justify-center overflow-auto bg-black p-4 sm:p-8">
+
+          {file.previewUrl ? (
+            <img
+              src={file.previewUrl}
+              alt={file.name}
+              className="max-h-[70vh] max-w-full rounded-lg object-contain shadow-2xl"
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center text-center">
+
+              <FileImage className="h-16 w-16 text-slate-600" />
+
+              <p className="mt-4 text-sm text-slate-400">
+                Image preview unavailable
+              </p>
+
+            </div>
+          )}
+
+        </div>
+
+        {/* =================================================
+            FOOTER ACTIONS
+        ================================================= */}
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-slate-950 px-4 py-3 sm:px-5">
+
+          <div className="text-xs text-slate-500">
+            {file.modified}
+          </div>
+
+          <div className="flex items-center gap-2">
+
+            <button
+              onClick={onDownload}
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
+            >
+              <Download className="h-4 w-4" />
+              <span className="hidden sm:inline">
+                Download
+              </span>
+            </button>
+
+            <button
+              onClick={onDelete}
+              className="inline-flex items-center gap-2 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm font-semibold text-red-400 transition hover:bg-red-500/20"
+            >
+              <Trash2 className="h-4 w-4" />
+              <span className="hidden sm:inline">
+                Delete
+              </span>
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
   );
 }
 
@@ -1615,8 +2017,11 @@ function Modal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) {
+      onMouseDown={(event) => {
+        if (
+          event.target ===
+          event.currentTarget
+        ) {
           onClose();
         }
       }}
@@ -1634,12 +2039,13 @@ function Modal({
         {children}
 
       </div>
+
     </div>
   );
 }
 
 /* =========================================================
-   HELPERS
+   FILE TYPE
 ========================================================= */
 
 function getFileType(
@@ -1664,7 +2070,12 @@ function getFileType(
       "webp",
       "svg",
       "bmp",
-    ].includes(extension || "")
+      "avif",
+      "heic",
+      "heif",
+    ].includes(
+      extension || ""
+    )
   ) {
     return "image";
   }
@@ -1676,7 +2087,9 @@ function getFileType(
       "7z",
       "tar",
       "gz",
-    ].includes(extension || "")
+    ].includes(
+      extension || ""
+    )
   ) {
     return "zip";
   }
@@ -1685,7 +2098,7 @@ function getFileType(
 }
 
 /* =========================================================
-   FILE SIZE
+   FORMAT FILE SIZE
 ========================================================= */
 
 function formatFileSize(
@@ -1703,9 +2116,12 @@ function formatFileSize(
     "TB",
   ];
 
-  const index = Math.floor(
-    Math.log(bytes) /
-      Math.log(1024)
+  const index = Math.min(
+    Math.floor(
+      Math.log(bytes) /
+        Math.log(1024)
+    ),
+    units.length - 1
   );
 
   return `${(
