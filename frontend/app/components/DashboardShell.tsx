@@ -17,6 +17,7 @@ import {
   Moon,
   ChevronRight,
   HardDrive,
+  Loader2,
 } from "lucide-react";
 
 type Theme = "light" | "dark";
@@ -25,12 +26,181 @@ interface DashboardShellProps {
   children: React.ReactNode;
 }
 
+interface UserProfile {
+  id?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+}
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:8080";
+
+/* =========================================
+   GET AUTH TOKEN
+========================================= */
+
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const possibleKeys = [
+    "token",
+    "accessToken",
+    "jwt",
+    "authToken",
+    "cloudstorage_token",
+    "cloud-storage-token",
+  ];
+
+  for (const key of possibleKeys) {
+    const value =
+      localStorage.getItem(key);
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+/* =========================================
+   API REQUEST
+========================================= */
+
+async function getCurrentUser(): Promise<UserProfile | null> {
+  const token = getAuthToken();
+
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE}/api/auth/me`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: token.startsWith(
+            "Bearer "
+          )
+            ? token
+            : `Bearer ${token}`,
+          "Content-Type":
+            "application/json",
+        },
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+
+    /*
+      Backend response direct object:
+      {
+        id,
+        name,
+        email,
+        role
+      }
+
+      OR
+
+      {
+        user: {
+          id,
+          name,
+          email,
+          role
+        }
+      }
+    */
+
+    if (
+      data &&
+      typeof data === "object"
+    ) {
+      if (
+        data.user &&
+        typeof data.user === "object"
+      ) {
+        return data.user as UserProfile;
+      }
+
+      if (
+        data.data &&
+        typeof data.data === "object"
+      ) {
+        return data.data as UserProfile;
+      }
+
+      return data as UserProfile;
+    }
+
+    return null;
+  } catch (error) {
+    console.error(
+      "Failed to load current user:",
+      error
+    );
+
+    return null;
+  }
+}
+
+/* =========================================
+   GET INITIALS
+========================================= */
+
+function getInitials(
+  name?: string,
+  email?: string
+): string {
+  const value =
+    name?.trim() ||
+    email?.trim() ||
+    "U";
+
+  const parts = value
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    return (
+      parts[0][0] +
+      parts[parts.length - 1][0]
+    ).toUpperCase();
+  }
+
+  return value
+    .charAt(0)
+    .toUpperCase();
+}
+
 export default function DashboardShell({
   children,
 }: DashboardShellProps) {
-  const [theme, setTheme] = useState<Theme>("dark");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const [theme, setTheme] =
+    useState<Theme>("dark");
+
+  const [sidebarOpen, setSidebarOpen] =
+    useState(false);
+
+  const [mounted, setMounted] =
+    useState(false);
+
+  const [user, setUser] =
+    useState<UserProfile | null>(null);
+
+  const [userLoading, setUserLoading] =
+    useState(true);
 
   /* =========================================
      THEME INITIALIZATION
@@ -40,25 +210,63 @@ export default function DashboardShell({
     setMounted(true);
 
     const savedTheme =
-      localStorage.getItem("cloudvault-theme");
+      localStorage.getItem(
+        "cloudvault-theme"
+      );
 
     const initialTheme: Theme =
-      savedTheme === "light" ? "light" : "dark";
+      savedTheme === "light"
+        ? "light"
+        : "dark";
 
     setTheme(initialTheme);
 
     if (initialTheme === "dark") {
-      document.documentElement.classList.add("dark");
+      document.documentElement.classList.add(
+        "dark"
+      );
     } else {
-      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.remove(
+        "dark"
+      );
     }
   }, []);
+
+  /* =========================================
+     LOAD LOGGED-IN USER
+  ========================================= */
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadUser() {
+      setUserLoading(true);
+
+      const currentUser =
+        await getCurrentUser();
+
+      if (active) {
+        setUser(currentUser);
+        setUserLoading(false);
+      }
+    }
+
+    if (mounted) {
+      loadUser();
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [mounted]);
 
   /* =========================================
      CHANGE THEME
   ========================================= */
 
-  function changeTheme(nextTheme: Theme) {
+  function changeTheme(
+    nextTheme: Theme
+  ) {
     setTheme(nextTheme);
 
     localStorage.setItem(
@@ -67,15 +275,21 @@ export default function DashboardShell({
     );
 
     if (nextTheme === "dark") {
-      document.documentElement.classList.add("dark");
+      document.documentElement.classList.add(
+        "dark"
+      );
     } else {
-      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.remove(
+        "dark"
+      );
     }
   }
 
   function toggleTheme() {
     changeTheme(
-      theme === "dark" ? "light" : "dark"
+      theme === "dark"
+        ? "light"
+        : "dark"
     );
   }
 
@@ -84,7 +298,27 @@ export default function DashboardShell({
   ========================================= */
 
   function handleLogout() {
-    localStorage.removeItem("token");
+    /*
+      Only remove authentication token.
+
+      User's files/folders remain safely
+      stored in the database.
+    */
+
+    const possibleKeys = [
+      "token",
+      "accessToken",
+      "jwt",
+      "authToken",
+      "cloudstorage_token",
+      "cloud-storage-token",
+    ];
+
+    possibleKeys.forEach((key) => {
+      localStorage.removeItem(key);
+    });
+
+    setUser(null);
 
     window.location.href = "/login";
   }
@@ -131,6 +365,25 @@ export default function DashboardShell({
     );
   }
 
+  /* =========================================
+     USER DISPLAY VALUES
+  ========================================= */
+
+  const displayName =
+    user?.name?.trim() ||
+    user?.email?.split("@")[0] ||
+    "User";
+
+  const displayEmail =
+    user?.email ||
+    "CloudVault Account";
+
+  const initials =
+    getInitials(
+      user?.name,
+      user?.email
+    );
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-white">
 
@@ -142,7 +395,9 @@ export default function DashboardShell({
         <button
           type="button"
           aria-label="Close sidebar"
-          onClick={() => setSidebarOpen(false)}
+          onClick={() =>
+            setSidebarOpen(false)
+          }
           className="fixed inset-0 z-40 bg-slate-950/50 backdrop-blur-sm lg:hidden"
         />
       )}
@@ -420,17 +675,19 @@ export default function DashboardShell({
             TOP NAVBAR
         ==================================== */}
 
-        <header className="
-          sticky
-          top-0
-          z-30
-          border-b
-          border-slate-200
-          bg-white/90
-          backdrop-blur-xl
-          dark:border-white/10
-          dark:bg-slate-950/90
-        ">
+        <header
+          className="
+            sticky
+            top-0
+            z-30
+            border-b
+            border-slate-200
+            bg-white/90
+            backdrop-blur-xl
+            dark:border-white/10
+            dark:bg-slate-950/90
+          "
+        >
 
           <div className="flex h-20 items-center justify-between px-4 sm:px-6 lg:px-8">
 
@@ -527,42 +784,62 @@ export default function DashboardShell({
                   USER PROFILE
               ================================== */}
 
-              <div className="
-                flex
-                items-center
-                gap-3
-                border-l
-                border-slate-200
-                pl-3
-                dark:border-white/10
-              ">
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-3
+                  border-l
+                  border-slate-200
+                  pl-3
+                  dark:border-white/10
+                "
+              >
 
                 <div className="hidden text-right sm:block">
 
-                  <p className="text-sm font-semibold text-slate-800 dark:text-white">
-                    User
-                  </p>
+                  {userLoading ? (
+                    <>
+                      <div className="ml-auto h-4 w-24 animate-pulse rounded bg-slate-200 dark:bg-white/10" />
 
-                  <p className="text-[11px] text-slate-400">
-                    CloudVault Account
-                  </p>
+                      <div className="mt-2 ml-auto h-3 w-32 animate-pulse rounded bg-slate-100 dark:bg-white/5" />
+                    </>
+                  ) : (
+                    <>
+                      <p className="max-w-[180px] truncate text-sm font-semibold text-slate-800 dark:text-white">
+                        {displayName}
+                      </p>
+
+                      <p className="max-w-[220px] truncate text-[11px] text-slate-400">
+                        {displayEmail}
+                      </p>
+                    </>
+                  )}
                 </div>
 
-                <div className="
-                  flex
-                  h-10
-                  w-10
-                  items-center
-                  justify-center
-                  rounded-xl
-                  bg-blue-600
-                  text-sm
-                  font-bold
-                  text-white
-                  shadow-lg
-                  shadow-blue-600/20
-                ">
-                  U
+                <div
+                  title={displayName}
+                  className="
+                    flex
+                    h-10
+                    w-10
+                    shrink-0
+                    items-center
+                    justify-center
+                    rounded-xl
+                    bg-blue-600
+                    text-sm
+                    font-bold
+                    text-white
+                    shadow-lg
+                    shadow-blue-600/20
+                  "
+                >
+                  {userLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    initials
+                  )}
                 </div>
               </div>
             </div>
