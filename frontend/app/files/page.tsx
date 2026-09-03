@@ -2,27 +2,22 @@
 
 import {
   Archive,
-  ArrowLeft,
-  ChevronDown,
+  ChevronRight,
   Download,
-  File as FileIconLucide,
+  File,
   FileImage,
   FileText,
   Folder,
+  FolderOpen,
   FolderPlus,
   Grid2X2,
   HardDrive,
-  Image as ImageIcon,
   List,
   MoreHorizontal,
   Search,
-  Share2,
   Trash2,
   Upload,
   X,
-  Loader2,
-  RefreshCw,
-  FileArchive,
 } from "lucide-react";
 
 import {
@@ -36,67 +31,60 @@ import {
 
 import DashboardShell from "../components/DashboardShell";
 
-type ApiFile = {
+type FolderItem = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: string;
+};
+
+type FileItem = {
   id: string;
   fileName: string;
   fileType: string;
   fileSize: number;
   filePath: string;
-  userId: string;
-  parentFolderId: string | null;
+  folderId: string | null;
   createdAt: string;
 };
 
-type ApiFolder = {
-  id: string;
-  name: string;
-  userId: string;
-  parentFolderId: string | null;
-  createdAt: string;
-};
-
-type ExplorerItem =
-  | {
-      kind: "folder";
-      id: string;
-      name: string;
-      size: number;
-      modified: string;
-      folder: ApiFolder;
-    }
+type SelectedItem =
   | {
       kind: "file";
-      id: string;
-      name: string;
-      size: number;
-      modified: string;
-      file: ApiFile;
+      item: FileItem;
+    }
+  | {
+      kind: "folder";
+      item: FolderItem;
     };
-
-type SortType = "recent" | "name" | "size";
-type ViewType = "grid" | "list";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:8080";
 
 export default function FilesPage() {
-  const [files, setFiles] = useState<ApiFile[]>([]);
-  const [folders, setFolders] = useState<ApiFolder[]>([]);
+  const [folders, setFolders] =
+    useState<FolderItem[]>([]);
+
+  const [files, setFiles] =
+    useState<FileItem[]>([]);
 
   const [currentFolderId, setCurrentFolderId] =
     useState<string | null>(null);
 
-  const [folderStack, setFolderStack] = useState<ApiFolder[]>(
-    []
-  );
+  const [folderPath, setFolderPath] =
+    useState<FolderItem[]>([]);
 
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] =
-    useState<SortType>("recent");
+  const [search, setSearch] =
+    useState("");
 
   const [view, setView] =
-    useState<ViewType>("grid");
+    useState<"grid" | "list">("grid");
+
+  const [sortBy, setSortBy] =
+    useState<"recent" | "name" | "size">(
+      "recent"
+    );
 
   const [showUpload, setShowUpload] =
     useState(false);
@@ -107,14 +95,8 @@ export default function FilesPage() {
   const [folderName, setFolderName] =
     useState("");
 
-  const [selectedItem, setSelectedItem] =
-    useState<ExplorerItem | null>(null);
-
-  const [previewFile, setPreviewFile] =
-    useState<ApiFile | null>(null);
-
-  const [previewUrl, setPreviewUrl] =
-    useState<string | null>(null);
+  const [selected, setSelected] =
+    useState<SelectedItem | null>(null);
 
   const [loading, setLoading] =
     useState(true);
@@ -122,384 +104,484 @@ export default function FilesPage() {
   const [uploading, setUploading] =
     useState(false);
 
-  const [creatingFolder, setCreatingFolder] =
-    useState(false);
-
   const [error, setError] =
     useState("");
 
-  const [dragActive, setDragActive] =
-    useState(false);
+  const [previewUrl, setPreviewUrl] =
+    useState<string | null>(null);
+
+  const [previewFile, setPreviewFile] =
+    useState<FileItem | null>(null);
 
   const fileInputRef =
     useRef<HTMLInputElement>(null);
 
-  const getToken = () => {
+  // ==========================================
+  // TOKEN
+  // ==========================================
+
+  function getToken() {
     if (typeof window === "undefined") {
       return null;
     }
 
     return localStorage.getItem("token");
-  };
+  }
 
-  const apiRequest = useCallback(
-    async (
-      endpoint: string,
-      options: RequestInit = {}
-    ) => {
-      const token = getToken();
+  // ==========================================
+  // AUTH REQUEST
+  // ==========================================
 
-      if (!token) {
-        throw new Error(
-          "Your session has expired. Please login again."
-        );
-      }
+  async function apiFetch(
+    url: string,
+    options: RequestInit = {}
+  ) {
+    const token = getToken();
 
-      const headers = new Headers(
-        options.headers
+    if (!token) {
+      throw new Error(
+        "Please login again."
       );
+    }
 
-      headers.set(
-        "Authorization",
-        `Bearer ${token}`
-      );
+    const headers = new Headers(
+      options.headers
+    );
 
-      const response = await fetch(
-        `${API_URL}${endpoint}`,
-        {
-          ...options,
-          headers,
-        }
-      );
+    headers.set(
+      "Authorization",
+      `Bearer ${token}`
+    );
 
-      if (!response.ok) {
-        let message =
-          `Request failed (${response.status})`;
+    return fetch(url, {
+      ...options,
+      headers,
+    });
+  }
 
-        try {
-          const text = await response.text();
+  // ==========================================
+  // LOAD DATA
+  // ==========================================
 
-          if (text) {
-            message = text;
-          }
-        } catch {
-          // Ignore parsing error
-        }
-
-        throw new Error(message);
-      }
-
-      return response;
-    },
-    []
-  );
-
-  const loadExplorer = useCallback(
-    async () => {
-      setLoading(true);
-      setError("");
-
+  const loadData = useCallback(
+    async (folderId: string | null) => {
       try {
-        const query = currentFolderId
-          ? `?parentFolderId=${encodeURIComponent(
-              currentFolderId
-            )}`
-          : "";
+        setLoading(true);
+        setError("");
 
-        const [folderResponse, fileResponse] =
-          await Promise.all([
-            apiRequest(
-              `/api/folders${query}`
-            ),
-            apiRequest(
-              `/api/files${query}`
-            ),
-          ]);
+        const folderQuery =
+          folderId
+            ? `?folderId=${encodeURIComponent(
+                folderId
+              )}`
+            : "";
 
-        const folderData =
-          (await folderResponse.json()) as ApiFolder[];
+        const [
+          foldersResponse,
+          filesResponse,
+        ] = await Promise.all([
+          apiFetch(
+            `${API_URL}/api/folders${folderQuery}`
+          ),
 
-        const fileData =
-          (await fileResponse.json()) as ApiFile[];
+          apiFetch(
+            `${API_URL}/api/files${folderQuery}`
+          ),
+        ]);
 
-        setFolders(folderData);
-        setFiles(fileData);
+        if (
+          foldersResponse.status === 401 ||
+          filesResponse.status === 401
+        ) {
+          localStorage.removeItem("token");
+          window.location.href =
+            "/login";
+
+          return;
+        }
+
+        if (!foldersResponse.ok) {
+          throw new Error(
+            "Could not load folders."
+          );
+        }
+
+        if (!filesResponse.ok) {
+          throw new Error(
+            "Could not load files."
+          );
+        }
+
+        const foldersData =
+          await foldersResponse.json();
+
+        const filesData =
+          await filesResponse.json();
+
+        setFolders(
+          Array.isArray(foldersData)
+            ? foldersData
+            : []
+        );
+
+        setFiles(
+          Array.isArray(filesData)
+            ? filesData
+            : []
+        );
       } catch (err) {
         setError(
           err instanceof Error
             ? err.message
-            : "Could not load your files."
+            : "Something went wrong."
         );
       } finally {
         setLoading(false);
       }
     },
-    [apiRequest, currentFolderId]
+    []
   );
+
+  // ==========================================
+  // INITIAL LOAD
+  // ==========================================
 
   useEffect(() => {
-    loadExplorer();
-  }, [loadExplorer]);
+    loadData(null);
+  }, [loadData]);
 
-  const items = useMemo<ExplorerItem[]>(
-    () => [
-      ...folders.map((folder) => ({
-        kind: "folder" as const,
-        id: folder.id,
-        name: folder.name,
-        size: 0,
-        modified: folder.createdAt,
-        folder,
-      })),
+  // ==========================================
+  // OPEN FOLDER
+  // ==========================================
 
-      ...files.map((file) => ({
-        kind: "file" as const,
-        id: file.id,
-        name: file.fileName,
-        size: file.fileSize,
-        modified: file.createdAt,
-        file,
-      })),
-    ],
-    [folders, files]
-  );
-
-  const filteredItems = useMemo(() => {
-    let result = items.filter((item) =>
-      item.name
-        .toLowerCase()
-        .includes(search.trim().toLowerCase())
-    );
-
-    if (sortBy === "name") {
-      result = [...result].sort((a, b) =>
-        a.name.localeCompare(b.name)
-      );
-    }
-
-    if (sortBy === "size") {
-      result = [...result].sort(
-        (a, b) => b.size - a.size
-      );
-    }
-
-    if (sortBy === "recent") {
-      result = [...result].sort(
-        (a, b) =>
-          new Date(b.modified).getTime() -
-          new Date(a.modified).getTime()
-      );
-    }
-
-    return result;
-  }, [items, search, sortBy]);
-
-  const totalStorage = useMemo(
-    () =>
-      files.reduce(
-        (total, file) =>
-          total + (file.fileSize || 0),
-        0
-      ),
-    [files]
-  );
-
-  async function uploadFiles(
-    selectedFiles: FileList | File[]
+  async function openFolder(
+    folder: FolderItem
   ) {
-    if (!selectedFiles.length) {
+    setCurrentFolderId(folder.id);
+
+    setFolderPath((current) => [
+      ...current,
+      folder,
+    ]);
+
+    setSearch("");
+
+    await loadData(folder.id);
+  }
+
+  // ==========================================
+  // BREADCRUMB NAVIGATION
+  // ==========================================
+
+  async function navigateToBreadcrumb(
+    index: number
+  ) {
+    if (index === -1) {
+      setCurrentFolderId(null);
+      setFolderPath([]);
+      setSearch("");
+
+      await loadData(null);
+
       return;
     }
 
-    setUploading(true);
-    setError("");
+    const target =
+      folderPath[index];
 
-    try {
-      for (const file of Array.from(
-        selectedFiles
-      )) {
-        const formData = new FormData();
-
-        formData.append("file", file);
-
-        if (currentFolderId) {
-          formData.append(
-            "parentFolderId",
-            currentFolderId
-          );
-        }
-
-        await apiRequest(
-          "/api/files/upload",
-          {
-            method: "POST",
-            body: formData,
-          }
-        );
-      }
-
-      await loadExplorer();
-
-      setShowUpload(false);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "File upload failed."
+    const newPath =
+      folderPath.slice(
+        0,
+        index + 1
       );
-    } finally {
-      setUploading(false);
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
+    setFolderPath(newPath);
+    setCurrentFolderId(target.id);
+    setSearch("");
+
+    await loadData(target.id);
   }
 
-  function handleFileInput(
-    event: ChangeEvent<HTMLInputElement>
-  ) {
-    if (event.target.files) {
-      uploadFiles(event.target.files);
-    }
-  }
-
-  function handleDrop(
-    event: React.DragEvent<HTMLDivElement>
-  ) {
-    event.preventDefault();
-    setDragActive(false);
-
-    if (
-      event.dataTransfer.files &&
-      event.dataTransfer.files.length
-    ) {
-      uploadFiles(
-        event.dataTransfer.files
-      );
-    }
-  }
+  // ==========================================
+  // CREATE FOLDER
+  // ==========================================
 
   async function createFolder() {
     const cleanName =
       folderName.trim();
 
     if (!cleanName) {
-      setError("Please enter a folder name.");
       return;
     }
 
-    setCreatingFolder(true);
-    setError("");
-
     try {
-      await apiRequest(
-        "/api/folders",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            name: cleanName,
-            parentFolderId:
-              currentFolderId,
-          }),
-        }
-      );
+      setError("");
+
+      const response =
+        await apiFetch(
+          `${API_URL}/api/folders`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              name: cleanName,
+              parentId:
+                currentFolderId,
+            }),
+          }
+        );
+
+      if (!response.ok) {
+        const message =
+          await response.text();
+
+        throw new Error(
+          message ||
+            "Could not create folder."
+        );
+      }
 
       setFolderName("");
       setShowFolder(false);
 
-      await loadExplorer();
+      await loadData(
+        currentFolderId
+      );
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
           : "Could not create folder."
       );
-    } finally {
-      setCreatingFolder(false);
     }
   }
 
-  async function deleteSelected() {
-    if (!selectedItem) {
+  // ==========================================
+  // UPLOAD
+  // ==========================================
+
+  async function handleFileUpload(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const selectedFiles =
+      event.target.files;
+
+    if (
+      !selectedFiles ||
+      selectedFiles.length === 0
+    ) {
       return;
     }
 
-    const confirmed = window.confirm(
-      selectedItem.kind === "folder"
-        ? `Delete "${selectedItem.name}" and everything inside it?`
-        : `Move "${selectedItem.name}" to trash?`
-    );
+    try {
+      setUploading(true);
+      setError("");
+
+      for (
+        const file of Array.from(
+          selectedFiles
+        )
+      ) {
+        const formData =
+          new FormData();
+
+        formData.append(
+          "file",
+          file
+        );
+
+        if (currentFolderId) {
+          formData.append(
+            "folderId",
+            currentFolderId
+          );
+        }
+
+        const response =
+          await apiFetch(
+            `${API_URL}/api/files/upload`,
+            {
+              method: "POST",
+              body: formData,
+            }
+          );
+
+        if (!response.ok) {
+          const message =
+            await response.text();
+
+          throw new Error(
+            message ||
+              `Upload failed for ${file.name}`
+          );
+        }
+      }
+
+      setShowUpload(false);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value =
+          "";
+      }
+
+      await loadData(
+        currentFolderId
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Upload failed."
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // ==========================================
+  // DELETE FILE
+  // ==========================================
+
+  async function deleteFile(
+    file: FileItem
+  ) {
+    const confirmed =
+      window.confirm(
+        `Delete "${file.fileName}"?`
+      );
 
     if (!confirmed) {
       return;
     }
 
-    setError("");
-
     try {
-      if (selectedItem.kind === "folder") {
-        await apiRequest(
-          `/api/folders/${selectedItem.id}`,
+      setError("");
+
+      const response =
+        await apiFetch(
+          `${API_URL}/api/files/${file.id}`,
           {
             method: "DELETE",
           }
         );
-      } else {
-        await apiRequest(
-          `/api/files/${selectedItem.id}`,
-          {
-            method: "DELETE",
-          }
+
+      if (!response.ok) {
+        throw new Error(
+          "Could not delete file."
         );
       }
 
-      setSelectedItem(null);
+      setSelected(null);
 
-      await loadExplorer();
+      await loadData(
+        currentFolderId
+      );
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "Delete operation failed."
+          : "Delete failed."
       );
     }
   }
 
+  // ==========================================
+  // DELETE FOLDER
+  // ==========================================
+
+  async function deleteFolder(
+    folder: FolderItem
+  ) {
+    const confirmed =
+      window.confirm(
+        `Delete folder "${folder.name}"?`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setError("");
+
+      const response =
+        await apiFetch(
+          `${API_URL}/api/folders/${folder.id}`,
+          {
+            method: "DELETE",
+          }
+        );
+
+      if (!response.ok) {
+        throw new Error(
+          "Could not delete folder."
+        );
+      }
+
+      setSelected(null);
+
+      await loadData(
+        currentFolderId
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Delete failed."
+      );
+    }
+  }
+
+  // ==========================================
+  // DOWNLOAD
+  // ==========================================
+
   async function downloadFile(
-    file: ApiFile
+    file: FileItem
   ) {
     try {
       setError("");
 
       const response =
-        await apiRequest(
-          `/api/files/${file.id}/download`
+        await apiFetch(
+          `${API_URL}/api/files/${file.id}/download`
         );
+
+      if (!response.ok) {
+        throw new Error(
+          "Could not download file."
+        );
+      }
 
       const blob =
         await response.blob();
 
       const url =
-        URL.createObjectURL(blob);
+        window.URL.createObjectURL(
+          blob
+        );
 
       const anchor =
         document.createElement("a");
 
       anchor.href = url;
-      anchor.download = file.fileName;
+      anchor.download =
+        file.fileName;
 
-      document.body.appendChild(anchor);
+      document.body.appendChild(
+        anchor
+      );
 
       anchor.click();
 
       anchor.remove();
 
-      URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(
+        url
+      );
     } catch (err) {
       setError(
         err instanceof Error
@@ -509,128 +591,139 @@ export default function FilesPage() {
     }
   }
 
-  async function openImage(
-    file: ApiFile
+  // ==========================================
+  // IMAGE PREVIEW
+  // ==========================================
+
+  async function previewImage(
+    file: FileItem
   ) {
     try {
       setError("");
 
       const response =
-        await apiRequest(
-          `/api/files/${file.id}/preview`
+        await apiFetch(
+          `${API_URL}/api/files/${file.id}/download`
         );
+
+      if (!response.ok) {
+        throw new Error(
+          "Could not preview image."
+        );
+      }
 
       const blob =
         await response.blob();
 
       const url =
-        URL.createObjectURL(blob);
+        window.URL.createObjectURL(
+          blob
+        );
 
-      setPreviewFile(file);
       setPreviewUrl(url);
+      setPreviewFile(file);
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
-          : "Could not preview image."
+          : "Preview failed."
       );
     }
   }
 
+  // ==========================================
+  // CLOSE PREVIEW
+  // ==========================================
+
   function closePreview() {
     if (previewUrl) {
-      URL.revokeObjectURL(previewUrl);
+      window.URL.revokeObjectURL(
+        previewUrl
+      );
     }
 
     setPreviewUrl(null);
     setPreviewFile(null);
   }
 
-  function openFolder(
-    folder: ApiFolder
-  ) {
-    setFolderStack((current) => [
-      ...current,
-      folder,
-    ]);
+  // ==========================================
+  // SORT + SEARCH
+  // ==========================================
 
-    setCurrentFolderId(folder.id);
-    setSearch("");
-    setSelectedItem(null);
-  }
+  const filteredFolders =
+    useMemo(() => {
+      return [...folders]
+        .filter((folder) =>
+          folder.name
+            .toLowerCase()
+            .includes(
+              search.toLowerCase()
+            )
+        )
+        .sort((a, b) =>
+          a.name.localeCompare(
+            b.name
+          )
+        );
+    }, [folders, search]);
 
-  function goBack() {
-    const newStack =
-      folderStack.slice(
-        0,
-        -1
-      );
+  const filteredFiles =
+    useMemo(() => {
+      let result =
+        files.filter((file) =>
+          file.fileName
+            .toLowerCase()
+            .includes(
+              search.toLowerCase()
+            )
+        );
 
-    const parent =
-      newStack.length
-        ? newStack[newStack.length - 1]
-        : null;
+      if (sortBy === "name") {
+        result = [...result].sort(
+          (a, b) =>
+            a.fileName.localeCompare(
+              b.fileName
+            )
+        );
+      }
 
-    setFolderStack(newStack);
+      if (sortBy === "size") {
+        result = [...result].sort(
+          (a, b) =>
+            b.fileSize -
+            a.fileSize
+        );
+      }
 
-    setCurrentFolderId(
-      parent?.id || null
+      if (sortBy === "recent") {
+        result = [...result].sort(
+          (a, b) =>
+            new Date(
+              b.createdAt
+            ).getTime() -
+            new Date(
+              a.createdAt
+            ).getTime()
+        );
+      }
+
+      return result;
+    }, [files, search, sortBy]);
+
+  // ==========================================
+  // STORAGE
+  // ==========================================
+
+  const totalSize =
+    files.reduce(
+      (total, file) =>
+        total + file.fileSize,
+      0
     );
-
-    setSearch("");
-    setSelectedItem(null);
-  }
-
-  function goToRoot() {
-    setFolderStack([]);
-    setCurrentFolderId(null);
-    setSearch("");
-    setSelectedItem(null);
-  }
-
-  function handleItemClick(
-    item: ExplorerItem
-  ) {
-    if (item.kind === "folder") {
-      openFolder(item.folder);
-      return;
-    }
-
-    if (
-      isImageFile(
-        item.file.fileType,
-        item.file.fileName
-      )
-    ) {
-      openImage(item.file);
-      return;
-    }
-
-    setSelectedItem(item);
-  }
-
-  const currentFolder =
-    folderStack.length
-      ? folderStack[
-          folderStack.length - 1
-        ]
-      : null;
-
-  const storageLimit =
-    10 * 1024 * 1024 * 1024;
-
-  const storagePercent = Math.min(
-    100,
-    Math.round(
-      (totalStorage /
-        storageLimit) *
-        100
-    )
-  );
 
   return (
     <DashboardShell>
-      <div className="mx-auto max-w-[1450px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
 
         {/* HEADER */}
 
@@ -652,12 +745,13 @@ export default function FilesPage() {
             </h1>
 
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Store, organize and manage your
-              files securely.
+              Store, organize and manage
+              your files securely.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
+
             <button
               onClick={() =>
                 setShowFolder(true)
@@ -683,19 +777,21 @@ export default function FilesPage() {
         {/* ERROR */}
 
         {error && (
-          <div className="mt-5 flex items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
+          <div className="mt-5 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300">
             <span>{error}</span>
 
             <button
-              onClick={() => setError("")}
-              className="shrink-0"
+              onClick={() =>
+                setError("")
+              }
+              className="ml-4"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
         )}
 
-        {/* STORAGE */}
+        {/* STORAGE CARD */}
 
         <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
 
@@ -713,7 +809,10 @@ export default function FilesPage() {
                 </p>
 
                 <p className="mt-1 text-xs text-slate-400">
-                  {formatFileSize(totalStorage)} used of 10 GB
+                  {formatFileSize(
+                    totalSize
+                  )}{" "}
+                  used
                 </p>
               </div>
             </div>
@@ -721,27 +820,30 @@ export default function FilesPage() {
             <div className="w-full sm:max-w-sm">
 
               <div className="mb-2 flex justify-between text-xs">
+
                 <span className="text-slate-400">
-                  {storagePercent}% used
+                  {files.length} files
                 </span>
 
                 <span className="font-medium text-slate-600 dark:text-slate-300">
-                  {formatFileSize(
-                    Math.max(
-                      0,
-                      storageLimit -
-                        totalStorage
-                    )
-                  )}{" "}
-                  free
+                  10 GB storage
                 </span>
               </div>
 
               <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
+
                 <div
                   className="h-full rounded-full bg-blue-600 transition-all"
                   style={{
-                    width: `${storagePercent}%`,
+                    width: `${Math.min(
+                      (totalSize /
+                        (10 *
+                          1024 *
+                          1024 *
+                          1024)) *
+                        100,
+                      100
+                    )}%`,
                   }}
                 />
               </div>
@@ -754,12 +856,15 @@ export default function FilesPage() {
         <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
 
           <div className="relative w-full lg:max-w-md">
+
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
             <input
               value={search}
               onChange={(e) =>
-                setSearch(e.target.value)
+                setSearch(
+                  e.target.value
+                )
               }
               placeholder="Search files and folders..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
@@ -768,27 +873,16 @@ export default function FilesPage() {
 
           <div className="flex items-center gap-3">
 
-            <button
-              onClick={loadExplorer}
-              disabled={loading}
-              title="Refresh"
-              className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${
-                  loading
-                    ? "animate-spin"
-                    : ""
-                }`}
-              />
-            </button>
-
             <div className="relative">
               <select
                 value={sortBy}
                 onChange={(e) =>
                   setSortBy(
-                    e.target.value as SortType
+                    e.target
+                      .value as
+                      | "recent"
+                      | "name"
+                      | "size"
                   )
                 }
                 className="h-11 appearance-none rounded-xl border border-slate-200 bg-white px-4 pr-9 text-sm font-medium text-slate-700 outline-none dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
@@ -805,8 +899,6 @@ export default function FilesPage() {
                   Size
                 </option>
               </select>
-
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             </div>
 
             <div className="flex h-11 rounded-xl border border-slate-200 bg-white p-1 dark:border-white/10 dark:bg-white/5">
@@ -842,102 +934,106 @@ export default function FilesPage() {
 
         {/* BREADCRUMB */}
 
-        <div className="mt-6 flex flex-wrap items-center gap-2 text-sm">
-
-          {currentFolderId && (
-            <button
-              onClick={goBack}
-              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back
-            </button>
-          )}
+        <div className="mt-6 flex items-center gap-1 overflow-x-auto text-sm">
 
           <button
-            onClick={goToRoot}
-            className="font-semibold text-slate-900 hover:text-blue-600 dark:text-white dark:hover:text-blue-400"
+            onClick={() =>
+              navigateToBreadcrumb(-1)
+            }
+            className="shrink-0 font-semibold text-slate-900 hover:text-blue-600 dark:text-white"
           >
             My Files
           </button>
 
-          {folderStack.map(
+          {folderPath.map(
             (folder, index) => (
               <div
                 key={folder.id}
-                className="flex items-center gap-2"
+                className="flex shrink-0 items-center"
               >
-                <span className="text-slate-300 dark:text-slate-700">
-                  /
-                </span>
+                <ChevronRight className="mx-1 h-4 w-4 text-slate-300" />
 
-                <span
-                  className={
-                    index ===
-                    folderStack.length - 1
-                      ? "font-semibold text-slate-900 dark:text-white"
-                      : "text-slate-400"
+                <button
+                  onClick={() =>
+                    navigateToBreadcrumb(
+                      index
+                    )
                   }
+                  className={`${
+                    index ===
+                    folderPath.length - 1
+                      ? "font-semibold text-slate-900 dark:text-white"
+                      : "text-slate-400 hover:text-blue-600"
+                  }`}
                 >
                   {folder.name}
-                </span>
+                </button>
               </div>
             )
           )}
         </div>
 
-        {/* CURRENT FOLDER TITLE */}
-
-        {currentFolder && (
-          <div className="mt-5 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-              <Folder className="h-5 w-5" />
-            </div>
-
-            <div>
-              <h2 className="font-bold text-slate-900 dark:text-white">
-                {currentFolder.name}
-              </h2>
-
-              <p className="text-xs text-slate-400">
-                {folders.length + files.length} items
-              </p>
-            </div>
-          </div>
-        )}
-
         {/* CONTENT */}
 
         {loading ? (
-          <div className="mt-6 flex min-h-[400px] items-center justify-center rounded-2xl border border-slate-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="h-7 w-7 animate-spin text-blue-600" />
-
-              <p className="text-sm text-slate-400">
-                Loading your files...
-              </p>
-            </div>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {Array.from({
+              length: 8,
+            }).map((_, index) => (
+              <div
+                key={index}
+                className="h-40 animate-pulse rounded-2xl bg-slate-100 dark:bg-white/5"
+              />
+            ))}
           </div>
-        ) : filteredItems.length === 0 ? (
+        ) : filteredFolders.length === 0 &&
+          filteredFiles.length === 0 ? (
           <EmptyState
             search={search}
             onUpload={() =>
               setShowUpload(true)
             }
-            onFolder={() =>
-              setShowFolder(true)
-            }
           />
         ) : view === "grid" ? (
           <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
-            {filteredItems.map(
-              (item) => (
-                <ExplorerCard
-                  key={`${item.kind}-${item.id}`}
-                  item={item}
+            {filteredFolders.map(
+              (folder) => (
+                <FolderCard
+                  key={folder.id}
+                  folder={folder}
+                  onOpen={() =>
+                    openFolder(folder)
+                  }
+                  onDelete={() =>
+                    deleteFolder(
+                      folder
+                    )
+                  }
+                />
+              )
+            )}
+
+            {filteredFiles.map(
+              (file) => (
+                <FileCard
+                  key={file.id}
+                  file={file}
                   onClick={() =>
-                    handleItemClick(item)
+                    setSelected({
+                      kind: "file",
+                      item: file,
+                    })
+                  }
+                  onPreview={() =>
+                    isImage(file.fileType)
+                      ? previewImage(
+                          file
+                        )
+                      : setSelected({
+                          kind: "file",
+                          item: file,
+                        })
                   }
                 />
               )
@@ -946,174 +1042,228 @@ export default function FilesPage() {
         ) : (
           <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
 
-            <div className="hidden grid-cols-[1fr_140px_160px_50px] gap-4 border-b border-slate-200 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:border-white/10 md:grid">
-              <span>Name</span>
-              <span>Size</span>
-              <span>Modified</span>
-              <span />
-            </div>
+            {filteredFolders.map(
+              (folder) => (
+                <ListFolder
+                  key={folder.id}
+                  folder={folder}
+                  onOpen={() =>
+                    openFolder(folder)
+                  }
+                  onDelete={() =>
+                    deleteFolder(
+                      folder
+                    )
+                  }
+                />
+              )
+            )}
 
-            {filteredItems.map(
-              (item) => (
-                <ExplorerListRow
-                  key={`${item.kind}-${item.id}`}
-                  item={item}
+            {filteredFiles.map(
+              (file) => (
+                <ListFile
+                  key={file.id}
+                  file={file}
                   onClick={() =>
-                    handleItemClick(item)
+                    setSelected({
+                      kind: "file",
+                      item: file,
+                    })
                   }
                 />
               )
             )}
           </div>
         )}
-
-        {/* UPLOAD MODAL */}
-
-        {showUpload && (
-          <UploadModal
-            inputRef={fileInputRef}
-            uploading={uploading}
-            dragActive={dragActive}
-            setDragActive={setDragActive}
-            onClose={() =>
-              setShowUpload(false)
-            }
-            onUpload={uploadFiles}
-            onInputChange={
-              handleFileInput
-            }
-          />
-        )}
-
-        {/* FOLDER MODAL */}
-
-        {showFolder && (
-          <FolderModal
-            value={folderName}
-            setValue={setFolderName}
-            loading={creatingFolder}
-            onClose={() =>
-              setShowFolder(false)
-            }
-            onCreate={createFolder}
-          />
-        )}
-
-        {/* DETAILS */}
-
-        {selectedItem && (
-          <DetailsModal
-            item={selectedItem}
-            onClose={() =>
-              setSelectedItem(null)
-            }
-            onDelete={deleteSelected}
-            onDownload={
-              selectedItem.kind === "file"
-                ? () =>
-                    downloadFile(
-                      selectedItem.file
-                    )
-                : undefined
-            }
-            onPreview={
-              selectedItem.kind === "file" &&
-              isImageFile(
-                selectedItem.file.fileType,
-                selectedItem.file.fileName
-              )
-                ? () =>
-                    openImage(
-                      selectedItem.file
-                    )
-                : undefined
-            }
-          />
-        )}
-
-        {/* IMAGE PREVIEW */}
-
-        {previewFile &&
-          previewUrl && (
-            <ImagePreviewModal
-              file={previewFile}
-              url={previewUrl}
-              onClose={closePreview}
-              onDownload={() =>
-                downloadFile(
-                  previewFile
-                )
-              }
-            />
-          )}
       </div>
+
+      {/* UPLOAD MODAL */}
+
+      {showUpload && (
+        <UploadModal
+          inputRef={fileInputRef}
+          uploading={uploading}
+          onClose={() =>
+            setShowUpload(false)
+          }
+          onUpload={
+            handleFileUpload
+          }
+        />
+      )}
+
+      {/* FOLDER MODAL */}
+
+      {showFolder && (
+        <FolderModal
+          value={folderName}
+          setValue={setFolderName}
+          onClose={() =>
+            setShowFolder(false)
+          }
+          onCreate={createFolder}
+        />
+      )}
+
+      {/* DETAILS */}
+
+      {selected?.kind === "file" && (
+        <FileDetailsModal
+          file={selected.item}
+          onClose={() =>
+            setSelected(null)
+          }
+          onDownload={() =>
+            downloadFile(
+              selected.item
+            )
+          }
+          onPreview={() =>
+            isImage(
+              selected.item.fileType
+            )
+              ? previewImage(
+                  selected.item
+                )
+              : undefined
+          }
+          onDelete={() =>
+            deleteFile(
+              selected.item
+            )
+          }
+        />
+      )}
+
+      {/* IMAGE PREVIEW */}
+
+      {previewUrl &&
+        previewFile && (
+          <ImagePreviewModal
+            file={previewFile}
+            url={previewUrl}
+            onClose={closePreview}
+            onDownload={() =>
+              downloadFile(
+                previewFile
+              )
+            }
+          />
+        )}
     </DashboardShell>
   );
 }
 
 /* ================================================= */
-/* EXPLORER CARD */
+/* FOLDER CARD */
 /* ================================================= */
 
-function ExplorerCard({
-  item,
-  onClick,
+function FolderCard({
+  folder,
+  onOpen,
+  onDelete,
 }: {
-  item: ExplorerItem;
-  onClick: () => void;
+  folder: FolderItem;
+  onOpen: () => void;
+  onDelete: () => void;
 }) {
-  const isFolder =
-    item.kind === "folder";
+  return (
+    <div
+      className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04]"
+    >
+      <button
+        onDoubleClick={onOpen}
+        onClick={onOpen}
+        className="w-full text-left"
+      >
+        <div className="flex items-start justify-between">
 
-  const isImage =
-    item.kind === "file" &&
-    isImageFile(
-      item.file.fileType,
-      item.file.fileName
-    );
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+            <Folder className="h-6 w-6" />
+          </div>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="rounded-lg p-2 text-slate-300 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
+          >
+            <MoreHorizontal className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mt-5">
+          <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
+            {folder.name}
+          </p>
+
+          <p className="mt-2 text-xs text-slate-400">
+            Folder
+          </p>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+/* ================================================= */
+/* FILE CARD */
+/* ================================================= */
+
+function FileCard({
+  file,
+  onClick,
+  onPreview,
+}: {
+  file: FileItem;
+  onClick: () => void;
+  onPreview: () => void;
+}) {
+  const image =
+    isImage(file.fileType);
 
   return (
     <button
-      onClick={onClick}
-      className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/30"
+      onClick={
+        image
+          ? onPreview
+          : onClick
+      }
+      className="group overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04]"
     >
-      <div className="flex items-start justify-between">
-
-        <div
-          className={`flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl ${
-            isFolder
-              ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
-              : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"
-          }`}
-        >
-          {isImage ? (
-            <ImageIcon className="h-6 w-6" />
-          ) : (
-            <ExplorerIcon item={item} />
-          )}
+      {image ? (
+        <div className="h-40 w-full overflow-hidden bg-slate-100 dark:bg-white/5">
+          <ImageThumbnail
+            file={file}
+          />
         </div>
+      ) : (
+        <div className="flex h-40 items-center justify-center bg-slate-50 dark:bg-white/[0.02]">
+          <FileIcon
+            fileType={
+              file.fileType
+            }
+          />
+        </div>
+      )}
 
-        <MoreHorizontal className="h-5 w-5 text-slate-300 dark:text-slate-600" />
-      </div>
-
-      <div className="mt-5">
+      <div className="p-4">
 
         <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
-          {item.name}
+          {file.fileName}
         </p>
 
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-400">
-            {isFolder
-              ? "Folder"
-              : formatFileSize(
-                  item.size
-                )}
+        <div className="mt-2 flex justify-between text-xs text-slate-400">
+          <span>
+            {formatFileSize(
+              file.fileSize
+            )}
           </span>
 
-          <span className="text-xs text-slate-400">
+          <span>
             {formatDate(
-              item.modified
+              file.createdAt
             )}
           </span>
         </div>
@@ -1123,159 +1273,252 @@ function ExplorerCard({
 }
 
 /* ================================================= */
-/* LIST ROW */
+/* IMAGE THUMBNAIL */
 /* ================================================= */
 
-function ExplorerListRow({
-  item,
-  onClick,
+function ImageThumbnail({
+  file,
 }: {
-  item: ExplorerItem;
-  onClick: () => void;
+  file: FileItem;
+}) {
+  const [src, setSrc] =
+    useState<string | null>(null);
+
+  useEffect(() => {
+    let objectUrl: string | null =
+      null;
+
+    async function load() {
+      try {
+        const token =
+          localStorage.getItem(
+            "token"
+          );
+
+        if (!token) return;
+
+        const response =
+          await fetch(
+            `${API_URL}/api/files/${file.id}/download`,
+            {
+              headers: {
+                Authorization:
+                  `Bearer ${token}`,
+              },
+            }
+          );
+
+        if (!response.ok) return;
+
+        const blob =
+          await response.blob();
+
+        objectUrl =
+          URL.createObjectURL(
+            blob
+          );
+
+        setSrc(objectUrl);
+      } catch {
+        // ignore thumbnail error
+      }
+    }
+
+    load();
+
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(
+          objectUrl
+        );
+      }
+    };
+  }, [file.id]);
+
+  if (!src) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <FileImage className="h-10 w-10 text-slate-300" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={file.fileName}
+      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+    />
+  );
+}
+
+/* ================================================= */
+/* LIST FOLDER */
+/* ================================================= */
+
+function ListFolder({
+  folder,
+  onOpen,
+  onDelete,
+}: {
+  folder: FolderItem;
+  onOpen: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <button
-      onClick={onClick}
-      className="grid w-full gap-3 border-b border-slate-100 px-5 py-4 text-left transition last:border-0 hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5 md:grid-cols-[1fr_140px_160px_50px] md:items-center md:gap-4"
-    >
-      <div className="flex items-center gap-3">
+    <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-white/5">
 
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
-          <ExplorerIcon item={item} />
+      <button
+        onDoubleClick={onOpen}
+        onClick={onOpen}
+        className="flex min-w-0 items-center gap-3 text-left"
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+          <Folder className="h-5 w-5" />
         </div>
 
         <span className="truncate text-sm font-semibold text-slate-800 dark:text-white">
-          {item.name}
+          {folder.name}
         </span>
+      </button>
+
+      <button
+        onClick={onDelete}
+        className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+/* ================================================= */
+/* LIST FILE */
+/* ================================================= */
+
+function ListFile({
+  file,
+  onClick,
+}: {
+  file: FileItem;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center justify-between border-b border-slate-100 px-5 py-4 text-left transition hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5"
+    >
+      <div className="flex min-w-0 items-center gap-3">
+
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
+          <FileIcon
+            fileType={
+              file.fileType
+            }
+          />
+        </div>
+
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
+            {file.fileName}
+          </p>
+
+          <p className="mt-1 text-xs text-slate-400">
+            {formatFileSize(
+              file.fileSize
+            )}
+          </p>
+        </div>
       </div>
 
-      <span className="hidden text-xs text-slate-400 md:block">
-        {item.kind === "folder"
-          ? "—"
-          : formatFileSize(
-              item.size
-            )}
-      </span>
-
-      <span className="hidden text-xs text-slate-400 md:block">
+      <span className="hidden text-xs text-slate-400 sm:block">
         {formatDate(
-          item.modified
+          file.createdAt
         )}
       </span>
-
-      <MoreHorizontal className="hidden h-5 w-5 text-slate-400 md:block" />
     </button>
   );
 }
 
 /* ================================================= */
-/* ICON */
+/* FILE ICON */
 /* ================================================= */
 
-function ExplorerIcon({
-  item,
+function FileIcon({
+  fileType,
 }: {
-  item: ExplorerItem;
+  fileType: string;
 }) {
-  if (item.kind === "folder") {
-    return (
-      <Folder className="h-6 w-6" />
-    );
-  }
-
-  const type =
-    item.file.fileType.toLowerCase();
-
-  const name =
-    item.file.fileName.toLowerCase();
-
   if (
-    type.includes("zip") ||
-    type.includes("rar") ||
-    type.includes("7z") ||
-    /\.(zip|rar|7z)$/i.test(name)
-  ) {
-    return (
-      <FileArchive className="h-6 w-6" />
-    );
-  }
-
-  if (
-    type.includes("pdf") ||
-    /\.pdf$/i.test(name)
-  ) {
-    return (
-      <FileText className="h-6 w-6" />
-    );
-  }
-
-  if (
-    isImageFile(
-      type,
-      name
+    fileType.startsWith(
+      "image/"
     )
   ) {
     return (
-      <FileImage className="h-6 w-6" />
+      <FileImage className="h-10 w-10" />
+    );
+  }
+
+  if (
+    fileType.includes("pdf")
+  ) {
+    return (
+      <FileText className="h-10 w-10" />
+    );
+  }
+
+  if (
+    fileType.includes("zip") ||
+    fileType.includes("rar")
+  ) {
+    return (
+      <Archive className="h-10 w-10" />
     );
   }
 
   return (
-    <FileIconLucide className="h-6 w-6" />
+    <File className="h-10 w-10" />
   );
 }
 
 /* ================================================= */
-/* EMPTY */
+/* EMPTY STATE */
 /* ================================================= */
 
 function EmptyState({
   search,
   onUpload,
-  onFolder,
 }: {
   search: string;
   onUpload: () => void;
-  onFolder: () => void;
 }) {
   return (
-    <div className="mt-6 flex min-h-[420px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-white/10 dark:bg-white/[0.03]">
+    <div className="mt-6 flex min-h-[400px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-white/10 dark:bg-white/[0.03]">
 
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/10">
-        <Folder className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+        <FolderOpen className="h-8 w-8 text-blue-600 dark:text-blue-400" />
       </div>
 
       <h3 className="mt-5 text-lg font-bold text-slate-900 dark:text-white">
         {search
           ? "No files found"
-          : "This folder is empty"}
+          : "Your storage is empty"}
       </h3>
 
       <p className="mt-2 max-w-md text-sm text-slate-400">
         {search
-          ? "Try another file or folder name."
-          : "Upload files or create a folder to start organizing your cloud storage."}
+          ? "Try another search."
+          : "Upload your first file or create a folder to get started."}
       </p>
 
       {!search && (
-        <div className="mt-6 flex flex-wrap justify-center gap-3">
-
-          <button
-            onClick={onFolder}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
-          >
-            <FolderPlus className="h-4 w-4" />
-            New Folder
-          </button>
-
-          <button
-            onClick={onUpload}
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500"
-          >
-            <Upload className="h-4 w-4" />
-            Upload File
-          </button>
-        </div>
+        <button
+          onClick={onUpload}
+          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500"
+        >
+          <Upload className="h-4 w-4" />
+          Upload File
+        </button>
       )}
     </div>
   );
@@ -1288,23 +1531,13 @@ function EmptyState({
 function UploadModal({
   inputRef,
   uploading,
-  dragActive,
-  setDragActive,
   onClose,
   onUpload,
-  onInputChange,
 }: {
   inputRef: React.RefObject<HTMLInputElement | null>;
   uploading: boolean;
-  dragActive: boolean;
-  setDragActive: (
-    value: boolean
-  ) => void;
   onClose: () => void;
   onUpload: (
-    files: FileList | File[]
-  ) => void;
-  onInputChange: (
     event: ChangeEvent<HTMLInputElement>
   ) => void;
 }) {
@@ -1314,11 +1547,7 @@ function UploadModal({
       <div className="text-center">
 
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-500/10">
-          {uploading ? (
-            <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-          ) : (
-            <Upload className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-          )}
+          <Upload className="h-6 w-6 text-blue-600 dark:text-blue-400" />
         </div>
 
         <h2 className="mt-5 text-xl font-bold text-slate-900 dark:text-white">
@@ -1326,85 +1555,31 @@ function UploadModal({
         </h2>
 
         <p className="mt-2 text-sm text-slate-400">
-          Upload one or multiple files to this folder.
+          Upload one or multiple files.
         </p>
 
-        <div
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragActive(true);
-          }}
-          onDragLeave={() =>
-            setDragActive(false)
-          }
-          onDrop={handleDropInternal(
-            setDragActive,
-            onUpload
-          )}
+        <button
+          disabled={uploading}
           onClick={() =>
-            !uploading &&
             inputRef.current?.click()
           }
-          className={`mt-6 cursor-pointer rounded-2xl border-2 border-dashed px-5 py-10 transition ${
-            dragActive
-              ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10"
-              : "border-slate-300 hover:border-blue-500 hover:bg-blue-50/40 dark:border-white/10 dark:hover:bg-blue-500/5"
-          }`}
+          className="mt-6 w-full rounded-xl border-2 border-dashed border-slate-300 px-5 py-8 text-sm font-semibold text-slate-600 transition hover:border-blue-500 hover:bg-blue-50/50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-blue-500/5"
         >
-          <Upload className="mx-auto h-7 w-7 text-blue-600 dark:text-blue-400" />
-
-          <p className="mt-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
-            Drop files here or click to browse
-          </p>
-
-          <p className="mt-1 text-xs text-slate-400">
-            Images, PDF, documents, ZIP and more
-          </p>
-        </div>
+          {uploading
+            ? "Uploading..."
+            : "Click to choose files"}
+        </button>
 
         <input
           ref={inputRef}
           type="file"
           multiple
           className="hidden"
-          disabled={uploading}
-          onChange={onInputChange}
+          onChange={onUpload}
         />
-
-        {uploading && (
-          <p className="mt-4 text-xs font-medium text-blue-600">
-            Uploading files...
-          </p>
-        )}
       </div>
     </Modal>
   );
-}
-
-function handleDropInternal(
-  setDragActive: (
-    value: boolean
-  ) => void,
-  onUpload: (
-    files: FileList | File[]
-  ) => void
-) {
-  return (
-    event: React.DragEvent<HTMLDivElement>
-  ) => {
-    event.preventDefault();
-
-    setDragActive(false);
-
-    if (
-      event.dataTransfer.files &&
-      event.dataTransfer.files.length
-    ) {
-      onUpload(
-        event.dataTransfer.files
-      );
-    }
-  };
 }
 
 /* ================================================= */
@@ -1414,13 +1589,13 @@ function handleDropInternal(
 function FolderModal({
   value,
   setValue,
-  loading,
   onClose,
   onCreate,
 }: {
   value: string;
-  setValue: (value: string) => void;
-  loading: boolean;
+  setValue: (
+    value: string
+  ) => void;
   onClose: () => void;
   onCreate: () => void;
 }) {
@@ -1438,9 +1613,10 @@ function FolderModal({
       <input
         autoFocus
         value={value}
-        disabled={loading}
         onChange={(e) =>
-          setValue(e.target.value)
+          setValue(
+            e.target.value
+          )
         }
         onKeyDown={(e) => {
           if (e.key === "Enter") {
@@ -1448,14 +1624,13 @@ function FolderModal({
           }
         }}
         placeholder="Folder name"
-        className="mt-6 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-white"
+        className="mt-6 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
       />
 
       <div className="mt-6 flex justify-end gap-3">
 
         <button
           onClick={onClose}
-          disabled={loading}
           className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-white/10 dark:text-slate-200"
         >
           Cancel
@@ -1463,16 +1638,8 @@ function FolderModal({
 
         <button
           onClick={onCreate}
-          disabled={
-            loading ||
-            !value.trim()
-          }
-          className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-500"
         >
-          {loading && (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          )}
-
           Create Folder
         </button>
       </div>
@@ -1481,43 +1648,45 @@ function FolderModal({
 }
 
 /* ================================================= */
-/* DETAILS */
+/* FILE DETAILS */
 /* ================================================= */
 
-function DetailsModal({
-  item,
+function FileDetailsModal({
+  file,
   onClose,
-  onDelete,
   onDownload,
   onPreview,
+  onDelete,
 }: {
-  item: ExplorerItem;
+  file: FileItem;
   onClose: () => void;
+  onDownload: () => void;
+  onPreview: () => void;
   onDelete: () => void;
-  onDownload?: () => void;
-  onPreview?: () => void;
 }) {
-  const isFolder =
-    item.kind === "folder";
+  const image =
+    isImage(file.fileType);
 
   return (
     <Modal onClose={onClose}>
 
       <div className="flex items-start gap-3">
 
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-          <ExplorerIcon item={item} />
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+          <FileIcon
+            fileType={
+              file.fileType
+            }
+          />
         </div>
 
         <div className="min-w-0">
           <h2 className="truncate text-lg font-bold text-slate-900 dark:text-white">
-            {item.name}
+            {file.fileName}
           </h2>
 
-          <p className="text-xs text-slate-400">
-            {isFolder
-              ? "Folder"
-              : item.file.fileType}
+          <p className="mt-1 text-xs text-slate-400">
+            {file.fileType}
           </p>
         </div>
       </div>
@@ -1525,29 +1694,16 @@ function DetailsModal({
       <div className="mt-6 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
 
         <DetailRow
-          label="Type"
-          value={
-            isFolder
-              ? "Folder"
-              : "File"
-          }
-        />
-
-        <DetailRow
           label="Size"
-          value={
-            isFolder
-              ? "—"
-              : formatFileSize(
-                  item.size
-                )
-          }
+          value={formatFileSize(
+            file.fileSize
+          )}
         />
 
         <DetailRow
-          label="Modified"
+          label="Created"
           value={formatDate(
-            item.modified
+            file.createdAt
           )}
         />
 
@@ -1557,37 +1713,32 @@ function DetailsModal({
         />
       </div>
 
-      {!isFolder && (
-        <div className="mt-6 grid grid-cols-2 gap-3">
+      <div className="mt-6 grid grid-cols-2 gap-3">
 
-          {onPreview && (
-            <button
-              onClick={onPreview}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
-            >
-              <ImageIcon className="h-4 w-4" />
-              Preview
-            </button>
-          )}
+        {image && (
+          <button
+            onClick={onPreview}
+            className="rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
+          >
+            Preview
+          </button>
+        )}
 
-          {onDownload && (
-            <button
-              onClick={onDownload}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
-            >
-              <Download className="h-4 w-4" />
-              Download
-            </button>
-          )}
-        </div>
-      )}
+        <button
+          onClick={onDownload}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-500"
+        >
+          <Download className="h-4 w-4" />
+          Download
+        </button>
+      </div>
 
       <button
         onClick={onDelete}
         className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10"
       >
         <Trash2 className="h-4 w-4" />
-        Move to Trash
+        Delete File
       </button>
     </Modal>
   );
@@ -1603,7 +1754,7 @@ function ImagePreviewModal({
   onClose,
   onDownload,
 }: {
-  file: ApiFile;
+  file: FileItem;
   url: string;
   onClose: () => void;
   onDownload: () => void;
@@ -1618,38 +1769,29 @@ function ImagePreviewModal({
         <X className="h-5 w-5" />
       </button>
 
-      <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-slate-950 shadow-2xl">
+      <div className="flex max-h-[90vh] max-w-6xl flex-col items-center">
 
-        <div className="flex items-center justify-between gap-4 border-b border-white/10 px-5 py-4">
+        <div className="overflow-hidden rounded-2xl bg-black/30 shadow-2xl">
+          <img
+            src={url}
+            alt={file.fileName}
+            className="max-h-[75vh] max-w-[90vw] object-contain"
+          />
+        </div>
 
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-white">
-              {file.fileName}
-            </p>
+        <div className="mt-4 flex items-center gap-3">
 
-            <p className="mt-1 text-xs text-slate-400">
-              {formatFileSize(
-                file.fileSize
-              )}
-            </p>
-          </div>
+          <span className="max-w-xs truncate text-sm font-medium text-white">
+            {file.fileName}
+          </span>
 
           <button
             onClick={onDownload}
-            className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/20"
+            className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 hover:bg-slate-100"
           >
             <Download className="h-4 w-4" />
             Download
           </button>
-        </div>
-
-        <div className="flex min-h-[300px] flex-1 items-center justify-center overflow-auto p-5">
-
-          <img
-            src={url}
-            alt={file.fileName}
-            className="max-h-[75vh] max-w-full rounded-xl object-contain shadow-2xl"
-          />
         </div>
       </div>
     </div>
@@ -1669,12 +1811,11 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between border-b border-slate-200 py-3 last:border-0 dark:border-white/5">
-
       <span className="text-xs text-slate-400">
         {label}
       </span>
 
-      <span className="max-w-[65%] truncate text-right text-xs font-semibold text-slate-700 dark:text-slate-200">
+      <span className="max-w-[220px] truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
         {value}
       </span>
     </div>
@@ -1695,10 +1836,9 @@ function Modal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
-      onMouseDown={(event) => {
+      onMouseDown={(e) => {
         if (
-          event.target ===
-          event.currentTarget
+          e.target === e.currentTarget
         ) {
           onClose();
         }
@@ -1723,28 +1863,18 @@ function Modal({
 /* HELPERS */
 /* ================================================= */
 
-function isImageFile(
-  fileType: string,
-  fileName: string
+function isImage(
+  fileType: string
 ) {
-  const type =
-    fileType.toLowerCase();
-
-  const name =
-    fileName.toLowerCase();
-
-  return (
-    type.startsWith("image/") ||
-    /\.(png|jpg|jpeg|gif|webp|bmp|svg)$/i.test(
-      name
-    )
+  return fileType.startsWith(
+    "image/"
   );
 }
 
 function formatFileSize(
   bytes: number
 ) {
-  if (!bytes || bytes < 1) {
+  if (!bytes) {
     return "0 Bytes";
   }
 
@@ -1753,46 +1883,32 @@ function formatFileSize(
     "KB",
     "MB",
     "GB",
-    "TB",
   ];
 
-  const index = Math.min(
-    Math.floor(
-      Math.log(bytes) /
-        Math.log(1024)
-    ),
-    units.length - 1
+  const index = Math.floor(
+    Math.log(bytes) /
+      Math.log(1024)
   );
 
-  const value =
+  return `${(
     bytes /
-    Math.pow(1024, index);
-
-  return `${value.toFixed(
+    Math.pow(1024, index)
+  ).toFixed(
     index === 0 ? 0 : 1
   )} ${units[index]}`;
 }
 
 function formatDate(
-  value: string
+  date: string
 ) {
-  const date =
-    new Date(value);
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return "—";
-  }
-
-  return new Intl.DateTimeFormat(
+  return new Date(
+    date
+  ).toLocaleDateString(
     "en-IN",
     {
       day: "2-digit",
       month: "short",
       year: "numeric",
     }
-  ).format(date);
+  );
 }
