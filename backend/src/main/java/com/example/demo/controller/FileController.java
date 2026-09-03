@@ -57,6 +57,10 @@ public class FileController {
         return user.getId();
     }
 
+    // =========================
+    // UPLOAD
+    // =========================
+
     @PostMapping("/upload")
     public ResponseEntity<File> uploadFile(
             @RequestParam("file") MultipartFile file,
@@ -79,6 +83,10 @@ public class FileController {
         );
     }
 
+    // =========================
+    // GET ACTIVE FILES
+    // =========================
+
     @GetMapping
     public ResponseEntity<List<File>> getFiles(
             @RequestParam(required = false)
@@ -96,6 +104,10 @@ public class FileController {
                 )
         );
     }
+
+    // =========================
+    // DOWNLOAD
+    // =========================
 
     @GetMapping("/{fileId}/download")
     public ResponseEntity<Resource> downloadFile(
@@ -122,6 +134,7 @@ public class FileController {
                     );
 
             if (!resource.exists()) {
+
                 throw new RuntimeException(
                         "Physical file not found"
                 );
@@ -150,6 +163,10 @@ public class FileController {
         }
     }
 
+    // =========================
+    // PREVIEW
+    // =========================
+
     @GetMapping("/{fileId}/preview")
     public ResponseEntity<Resource> previewFile(
             @PathVariable UUID fileId,
@@ -175,6 +192,7 @@ public class FileController {
                     );
 
             if (!resource.exists()) {
+
                 throw new RuntimeException(
                         "Physical file not found"
                 );
@@ -203,6 +221,10 @@ public class FileController {
         }
     }
 
+    // =========================
+    // MOVE TO TRASH
+    // =========================
+
     @DeleteMapping("/{fileId}")
     public ResponseEntity<String> deleteFile(
             @PathVariable UUID fileId,
@@ -218,7 +240,7 @@ public class FileController {
         );
 
         return ResponseEntity.ok(
-                "File deleted successfully"
+                "File moved to trash successfully"
         );
     }
 }
