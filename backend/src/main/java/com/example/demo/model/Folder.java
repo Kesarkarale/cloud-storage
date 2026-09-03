@@ -35,6 +35,11 @@ public class Folder {
 
     public Folder() {
     }
+        @Column(nullable = false)
+private boolean deleted = false;
+
+@Column(name = "deleted_at")
+private LocalDateTime deletedAt;
 
     @PrePersist
     public void onCreate() {
@@ -76,4 +81,19 @@ public class Folder {
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
+        public boolean isDeleted() {
+    return deleted;
+}
+
+public void setDeleted(boolean deleted) {
+    this.deleted = deleted;
+}
+
+public LocalDateTime getDeletedAt() {
+    return deletedAt;
+}
+
+public void setDeletedAt(LocalDateTime deletedAt) {
+    this.deletedAt = deletedAt;
+}
 }
