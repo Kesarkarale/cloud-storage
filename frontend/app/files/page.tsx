@@ -39,7 +39,7 @@ import {
   useState,
 } from "react";
 
-import DashboardShell from "@/components/DashboardShell";
+import DashboardShell from "@/app/components/DashboardShell";
 
 /* =========================================================
    TYPES
