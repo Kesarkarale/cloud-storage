@@ -3,12 +3,15 @@
 import {
   Archive,
   Check,
-  ChevronDown,
   File as FileIcon,
+  FileArchive,
+  FileAudio,
   FileImage,
+  FileSpreadsheet,
   FileText,
+  FileVideo,
+  Folder,
   Grid2X2,
-  HardDrive,
   List,
   Loader2,
   MoreHorizontal,
@@ -17,179 +20,159 @@ import {
   Search,
   Trash2,
   X,
-  AlertTriangle,
 } from "lucide-react";
 
 import {
+  ChangeEvent,
   useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
 
-import DashboardShell from "../components/DashboardShell";
+type UUID = string;
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:8080";
-
-type TrashType =
-  | "folder"
-  | "pdf"
-  | "image"
-  | "document"
-  | "zip"
-  | "other";
+type TrashType = "file" | "folder";
 
 type TrashItem = {
-  id: string;
+  id: UUID;
   name: string;
   type: TrashType;
-  sizeBytes: number;
   size: string;
-  deletedAt: string;
-  parentId: string | null;
+  deletedAt: string | null;
+  fileType?: string | null;
+  parentFolderId?: UUID | null;
 };
 
 type BackendTrashItem = {
-  id: string | number;
+  id?: UUID;
+  fileId?: UUID;
+  folderId?: UUID;
 
-  name?: string;
   fileName?: string;
-  filename?: string;
+  name?: string;
 
-  type?: string;
+  fileSize?: number;
+  size?: number | string;
+
   fileType?: string;
-  mimeType?: string;
   contentType?: string;
 
-  size?: number | string;
-  fileSize?: number | string;
+  deletedAt?: string | null;
 
-  deletedAt?: string;
-  deleted_at?: string;
-
-  updatedAt?: string;
-  createdAt?: string;
-
-  parentId?: string | number | null;
-  parentFolderId?: string | number | null;
-  folderId?: string | number | null;
+  parentFolderId?: UUID | null;
 
   folder?: boolean;
   isFolder?: boolean;
+
+  type?: string;
 };
 
-type ViewMode = "grid" | "list";
-
-type ModalType =
-  | "delete"
-  | "restore"
-  | "empty"
-  | null;
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  "http://localhost:8080";
 
 function getToken(): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
+  if (typeof window === "undefined") return null;
 
-  const keys = [
-    "token",
-    "accessToken",
-    "jwt",
-    "authToken",
-    "cloudstorage_token",
-    "cloud-storage-token",
-  ];
+  return (
+    localStorage.getItem("token") ||
+    localStorage.getItem("accessToken") ||
+    localStorage.getItem("jwt")
+  );
+}
 
-  for (const key of keys) {
-    const value = localStorage.getItem(key);
+function authHeaders(): HeadersInit {
+  const token = getToken();
 
-    if (value) {
-      return value;
+  return {
+    "Content-Type": "application/json",
+    ...(token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : {}),
+  };
+}
+
+async function parseApiError(response: Response): Promise<string> {
+  try {
+    const data = await response.json();
+
+    if (typeof data === "string") {
+      return data;
+    }
+
+    return (
+      data?.message ||
+      data?.error ||
+      data?.details ||
+      `Request failed with status ${response.status}`
+    );
+  } catch {
+    try {
+      const text = await response.text();
+
+      return (
+        text ||
+        `Request failed with status ${response.status}`
+      );
+    } catch {
+      return `Request failed with status ${response.status}`;
     }
   }
-
-  return null;
 }
 
 async function apiRequest(
   endpoint: string,
   options: RequestInit = {}
 ) {
-  const token = getToken();
-
-  const headers = new Headers(
-    options.headers || {}
-  );
-
-  if (token) {
-    headers.set(
-      "Authorization",
-      token.startsWith("Bearer ")
-        ? token
-        : `Bearer ${token}`
-    );
-  }
-
-  if (!(options.body instanceof FormData)) {
-    headers.set(
-      "Content-Type",
-      "application/json"
-    );
-  }
-
   const response = await fetch(
     `${API_BASE}${endpoint}`,
     {
       ...options,
-      headers,
-      cache: "no-store",
+      headers: {
+        ...authHeaders(),
+        ...(options.headers || {}),
+      },
     }
   );
 
-  if (response.status === 204) {
+  if (!response.ok) {
+    throw new Error(
+      await parseApiError(response)
+    );
+  }
+
+  const text = await response.text();
+
+  if (!text) {
     return null;
   }
 
-  const contentType =
-    response.headers.get("content-type") || "";
-
-  const isJson =
-    contentType.includes("application/json");
-
-  const data = isJson
-    ? await response.json()
-    : await response.text();
-
-  if (!response.ok) {
-    const message =
-      typeof data === "string"
-        ? data
-        : data?.message ||
-          data?.error ||
-          "Something went wrong";
-
-    if (
-      response.status === 401 ||
-      response.status === 403
-    ) {
-      throw new Error(
-        "Your session has expired. Please login again."
-      );
-    }
-
-    throw new Error(message);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
-
-  return data;
 }
 
-function formatFileSize(
-  bytes: number
+function formatBytes(
+  bytes: number | string | null | undefined
 ): string {
-  if (!bytes || bytes <= 0) {
-    return "0 B";
+  if (
+    bytes === null ||
+    bytes === undefined ||
+    bytes === ""
+  ) {
+    return "—";
+  }
+
+  const value = Number(bytes);
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return value === 0 ? "0 B" : "—";
   }
 
   const units = [
@@ -200,147 +183,31 @@ function formatFileSize(
     "TB",
   ];
 
-  const index = Math.floor(
-    Math.log(bytes) / Math.log(1024)
-  );
-
-  const safeIndex = Math.min(
-    index,
+  const index = Math.min(
+    Math.floor(Math.log(value) / Math.log(1024)),
     units.length - 1
   );
 
-  const value =
-    bytes /
-    Math.pow(1024, safeIndex);
+  const size =
+    value / Math.pow(1024, index);
 
-  return `${value.toFixed(
-    safeIndex === 0 ? 0 : 1
-  )} ${units[safeIndex]}`;
-}
-
-function getFileType(
-  item: BackendTrashItem
-): TrashType {
-  if (
-    item.folder === true ||
-    item.isFolder === true
-  ) {
-    return "folder";
-  }
-
-  const mime =
-    (
-      item.fileType ||
-      item.mimeType ||
-      item.contentType ||
-      item.type ||
-      ""
-    ).toLowerCase();
-
-  const name =
-    (
-      item.fileName ||
-      item.filename ||
-      item.name ||
-      ""
-    ).toLowerCase();
-
-  if (
-    mime.includes("pdf") ||
-    name.endsWith(".pdf")
-  ) {
-    return "pdf";
-  }
-
-  if (
-    mime.startsWith("image/") ||
-    /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|avif|heic|heif)$/i.test(
-      name
-    )
-  ) {
-    return "image";
-  }
-
-  if (
-    mime.includes("zip") ||
-    mime.includes("compressed") ||
-    /\.(zip|rar|7z|tar|gz)$/i.test(name)
-  ) {
-    return "zip";
-  }
-
-  if (
-    mime.includes("word") ||
-    mime.includes("document") ||
-    mime.includes("text") ||
-    /\.(doc|docx|txt|rtf|odt|xls|xlsx|ppt|pptx|csv)$/i.test(
-      name
-    )
-  ) {
-    return "document";
-  }
-
-  return "other";
-}
-
-function getFileIcon(type: TrashType) {
-  switch (type) {
-    case "pdf":
-      return FileText;
-
-    case "image":
-      return FileImage;
-
-    case "document":
-      return FileText;
-
-    case "folder":
-      return Archive;
-
-    case "zip":
-      return Archive;
-
-    default:
-      return FileIcon;
-  }
-}
-
-function getTypeLabel(type: TrashType) {
-  switch (type) {
-    case "pdf":
-      return "PDF";
-
-    case "image":
-      return "Image";
-
-    case "document":
-      return "Document";
-
-    case "zip":
-      return "Archive";
-
-    case "folder":
-      return "Folder";
-
-    default:
-      return "File";
-  }
+  return `${size.toFixed(index === 0 ? 0 : 1)} ${
+    units[index]
+  }`;
 }
 
 function formatDeletedDate(
-  date: string
-) {
-  if (!date) {
-    return "Recently deleted";
+  value: string | null
+): string {
+  if (!value) return "Unknown";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
   }
 
-  const parsed = new Date(date);
-
-  if (Number.isNaN(parsed.getTime())) {
-    return "Recently deleted";
-  }
-
-  return parsed.toLocaleString(
+  return date.toLocaleString(
     undefined,
     {
       day: "2-digit",
@@ -352,207 +219,316 @@ function formatDeletedDate(
   );
 }
 
+function getFileType(
+  item: BackendTrashItem
+): TrashType {
+  if (
+    item.folder === true ||
+    item.isFolder === true ||
+    item.type?.toLowerCase() === "folder"
+  ) {
+    return "folder";
+  }
+
+  return "file";
+}
+
 function normalizeTrashItem(
   item: BackendTrashItem
-): TrashItem {
-  const rawSize =
-    item.fileSize ??
-    item.size ??
-    0;
-
-  const sizeBytes =
-    typeof rawSize === "string"
-      ? Number(rawSize) || 0
-      : Number(rawSize) || 0;
-
-  const name =
-    item.fileName ||
-    item.filename ||
-    item.name ||
-    "Untitled file";
-
+): TrashItem | null {
   const type = getFileType(item);
 
+  const id =
+    item.id ||
+    item.fileId ||
+    item.folderId;
+
+  if (!id) {
+    return null;
+  }
+
+  const name =
+    item.name ||
+    item.fileName ||
+    (type === "folder"
+      ? "Untitled folder"
+      : "Untitled file");
+
   return {
-    id: String(item.id),
-
+    id,
     name,
-
     type,
-
-    sizeBytes,
-
     size:
       type === "folder"
         ? "—"
-        : formatFileSize(sizeBytes),
-
+        : formatBytes(
+            item.fileSize ??
+              item.size
+          ),
     deletedAt:
-      item.deletedAt ||
-      item.deleted_at ||
-      item.updatedAt ||
-      item.createdAt ||
-      "",
-
-    parentId:
-      item.parentFolderId != null
-        ? String(item.parentFolderId)
-        : item.parentId != null
-        ? String(item.parentId)
-        : item.folderId != null
-        ? String(item.folderId)
-        : null,
+      item.deletedAt || null,
+    fileType:
+      item.fileType ||
+      item.contentType ||
+      null,
+    parentFolderId:
+      item.parentFolderId || null,
   };
 }
 
+function getFileIcon(
+  type: TrashType,
+  fileType?: string | null
+) {
+  if (type === "folder") {
+    return Folder;
+  }
+
+  const value =
+    fileType?.toLowerCase() || "";
+
+  if (value.includes("image")) {
+    return FileImage;
+  }
+
+  if (value.includes("audio")) {
+    return FileAudio;
+  }
+
+  if (value.includes("video")) {
+    return FileVideo;
+  }
+
+  if (
+    value.includes("spreadsheet") ||
+    value.includes("excel") ||
+    value.includes("csv")
+  ) {
+    return FileSpreadsheet;
+  }
+
+  if (
+    value.includes("zip") ||
+    value.includes("rar") ||
+    value.includes("archive")
+  ) {
+    return FileArchive;
+  }
+
+  if (
+    value.includes("text") ||
+    value.includes("pdf") ||
+    value.includes("document") ||
+    value.includes("word")
+  ) {
+    return FileText;
+  }
+
+  return FileIcon;
+}
+
+function getTypeLabel(
+  type: TrashType
+) {
+  return type === "folder"
+    ? "Folder"
+    : "File";
+}
+
 export default function TrashPage() {
-  const [items, setItems] = useState<
-    TrashItem[]
-  >([]);
-
-  const [selectedIds, setSelectedIds] =
-    useState<Set<string>>(
-      new Set()
-    );
-
-  const [searchQuery, setSearchQuery] =
-    useState("");
-
-  const [viewMode, setViewMode] =
-    useState<ViewMode>("grid");
+  const [items, setItems] =
+    useState<TrashItem[]>([]);
 
   const [loading, setLoading] =
     useState(true);
 
-  const [actionLoading, setActionLoading] =
-    useState(false);
-
   const [refreshing, setRefreshing] =
     useState(false);
 
-  const [error, setError] =
-    useState<string | null>(null);
+  const [search, setSearch] =
+    useState("");
 
-  const [modalType, setModalType] =
-    useState<ModalType>(null);
+  const [viewMode, setViewMode] =
+    useState<"grid" | "list">("list");
 
-  const [modalItem, setModalItem] =
+  const [selectedIds, setSelectedIds] =
+    useState<Set<UUID>>(new Set());
+
+  const [restoreId, setRestoreId] =
+    useState<UUID | null>(null);
+
+  const [deleteId, setDeleteId] =
+    useState<UUID | null>(null);
+
+  const [deleteConfirm, setDeleteConfirm] =
     useState<TrashItem | null>(null);
 
-  const [showMenu, setShowMenu] =
-    useState<string | null>(null);
+  const [emptyConfirm, setEmptyConfirm] =
+    useState(false);
+
+  const [actionLoading, setActionLoading] =
+    useState(false);
+
+  const [toast, setToast] =
+    useState<{
+      type: "success" | "error";
+      message: string;
+    } | null>(null);
+
+  const showToast = useCallback(
+    (
+      type: "success" | "error",
+      message: string
+    ) => {
+      setToast({
+        type,
+        message,
+      });
+
+      setTimeout(() => {
+        setToast(null);
+      }, 3000);
+    },
+    []
+  );
 
   const loadTrash = useCallback(
     async (
-      showRefreshLoader = false
+      showRefresh = false
     ) => {
       try {
-        if (showRefreshLoader) {
+        if (showRefresh) {
           setRefreshing(true);
         } else {
           setLoading(true);
         }
 
-        setError(null);
-
         const data =
           await apiRequest("/api/trash");
 
-        let backendItems: BackendTrashItem[] =
-          [];
+        let rawItems: BackendTrashItem[] = [];
+
+        /*
+         * Supports multiple backend response formats:
+         *
+         * 1. [ file, folder, file ]
+         *
+         * 2. {
+         *      files: [...],
+         *      folders: [...]
+         *    }
+         *
+         * 3. {
+         *      items: [...]
+         *    }
+         *
+         * 4. {
+         *      content: [...]
+         *    }
+         */
 
         if (Array.isArray(data)) {
-          backendItems = data;
-        } else if (
-          data &&
-          Array.isArray(data.content)
-        ) {
-          backendItems = data.content;
+          rawItems = data;
         } else if (
           data &&
           Array.isArray(data.items)
         ) {
-          backendItems = data.items;
+          rawItems = data.items;
         } else if (
           data &&
-          Array.isArray(data.files)
+          Array.isArray(data.content)
         ) {
-          backendItems = data.files;
-        } else if (
-          data &&
-          Array.isArray(data.data)
-        ) {
-          backendItems = data.data;
+          rawItems = data.content;
+        } else if (data) {
+          const files =
+            Array.isArray(data.files)
+              ? data.files
+              : [];
+
+          const folders =
+            Array.isArray(data.folders)
+              ? data.folders.map(
+                  (folder: BackendTrashItem) => ({
+                    ...folder,
+                    folder: true,
+                    isFolder: true,
+                    type: "folder",
+                  })
+                )
+              : [];
+
+          rawItems = [
+            ...files,
+            ...folders,
+          ];
         }
 
         const normalized =
-          backendItems.map(
-            normalizeTrashItem
-          );
+          rawItems
+            .map(normalizeTrashItem)
+            .filter(
+              (
+                item
+              ): item is TrashItem =>
+                item !== null
+            );
 
         setItems(normalized);
-
-        setSelectedIds(
-          new Set()
-        );
-      } catch (err) {
+        setSelectedIds(new Set());
+      } catch (error: any) {
         console.error(
           "Trash loading error:",
-          err
+          error
         );
 
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to load trash"
+        showToast(
+          "error",
+          error?.message ||
+            "Unable to load Trash."
         );
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    []
+    [showToast]
   );
 
   useEffect(() => {
     loadTrash();
   }, [loadTrash]);
 
-  const filteredItems = useMemo(() => {
-    const query =
-      searchQuery
-        .trim()
-        .toLowerCase();
+  const filteredItems =
+    useMemo(() => {
+      const value =
+        search.trim().toLowerCase();
 
-    if (!query) {
-      return items;
-    }
+      if (!value) {
+        return items;
+      }
 
-    return items.filter(
-      (item) =>
+      return items.filter((item) =>
         item.name
           .toLowerCase()
-          .includes(query) ||
-        getTypeLabel(item.type)
-          .toLowerCase()
-          .includes(query)
-    );
-  }, [
-    items,
-    searchQuery,
-  ]);
+          .includes(value)
+      );
+    }, [items, search]);
 
-  const allVisibleSelected =
+  const selectedItems =
+    useMemo(() => {
+      return items.filter((item) =>
+        selectedIds.has(item.id)
+      );
+    }, [items, selectedIds]);
+
+  const allSelected =
     filteredItems.length > 0 &&
     filteredItems.every((item) =>
       selectedIds.has(item.id)
     );
 
-  const selectedCount =
-    selectedIds.size;
-
-  const toggleSelection = (
-    id: string
+  const toggleSelect = (
+    id: UUID
   ) => {
     setSelectedIds((previous) => {
       const next = new Set(previous);
@@ -568,52 +544,55 @@ export default function TrashPage() {
   };
 
   const toggleSelectAll = () => {
-    setSelectedIds((previous) => {
-      const next = new Set(previous);
+    if (allSelected) {
+      setSelectedIds(
+        (previous) => {
+          const next = new Set(previous);
 
-      if (allVisibleSelected) {
+          filteredItems.forEach(
+            (item) => {
+              next.delete(item.id);
+            }
+          );
+
+          return next;
+        }
+      );
+
+      return;
+    }
+
+    setSelectedIds(
+      (previous) => {
+        const next = new Set(previous);
+
         filteredItems.forEach(
-          (item) =>
-            next.delete(item.id)
+          (item) => {
+            next.add(item.id);
+          }
         );
-      } else {
-        filteredItems.forEach(
-          (item) =>
-            next.add(item.id)
-        );
+
+        return next;
       }
-
-      return next;
-    });
-  };
-
-  const openRestoreModal = (
-    item: TrashItem
-  ) => {
-    setModalItem(item);
-    setModalType("restore");
-    setShowMenu(null);
-  };
-
-  const openDeleteModal = (
-    item: TrashItem
-  ) => {
-    setModalItem(item);
-    setModalType("delete");
-    setShowMenu(null);
+    );
   };
 
   const restoreItem = async (
-    id: string
+    item: TrashItem
   ) => {
-    try {
-      setActionLoading(true);
-      setError(null);
+    if (actionLoading) return;
 
+    setRestoreId(item.id);
+    setActionLoading(true);
+
+    try {
+      /*
+       * Same endpoint is used for files/folders.
+       * Backend should detect whether the ID belongs
+       * to a deleted file or deleted folder.
+       */
       await apiRequest(
-        `/api/trash/${encodeURIComponent(
-          id
-        )}/restore`,
+        `/api/trash/${item.id}/restore`,
         {
           method: "POST",
         }
@@ -621,460 +600,355 @@ export default function TrashPage() {
 
       setItems((previous) =>
         previous.filter(
-          (item) => item.id !== id
+          (current) =>
+            current.id !== item.id
         )
       );
 
       setSelectedIds((previous) => {
         const next = new Set(previous);
-
-        next.delete(id);
-
+        next.delete(item.id);
         return next;
       });
 
-      setModalType(null);
-      setModalItem(null);
-    } catch (err) {
+      showToast(
+        "success",
+        `${item.type === "folder" ? "Folder" : "File"} restored successfully.`
+      );
+    } catch (error: any) {
       console.error(
         "Restore error:",
-        err
+        error
       );
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to restore file"
+      showToast(
+        "error",
+        error?.message ||
+          "Unable to restore item."
       );
     } finally {
+      setRestoreId(null);
       setActionLoading(false);
     }
   };
 
-  const permanentlyDelete = async (
-    id: string
-  ) => {
-    try {
+  const permanentlyDeleteItem =
+    async () => {
+      if (
+        !deleteConfirm ||
+        actionLoading
+      ) {
+        return;
+      }
+
+      const item = deleteConfirm;
+
+      setDeleteId(item.id);
       setActionLoading(true);
-      setError(null);
 
-      await apiRequest(
-        `/api/trash/${encodeURIComponent(
-          id
-        )}`,
-        {
-          method: "DELETE",
-        }
-      );
+      try {
+        await apiRequest(
+          `/api/trash/${item.id}`,
+          {
+            method: "DELETE",
+          }
+        );
 
-      setItems((previous) =>
-        previous.filter(
-          (item) => item.id !== id
-        )
-      );
+        setItems((previous) =>
+          previous.filter(
+            (current) =>
+              current.id !== item.id
+          )
+        );
 
-      setSelectedIds((previous) => {
-        const next = new Set(previous);
+        setSelectedIds((previous) => {
+          const next = new Set(previous);
+          next.delete(item.id);
+          return next;
+        });
 
-        next.delete(id);
+        setDeleteConfirm(null);
 
-        return next;
-      });
+        showToast(
+          "success",
+          `${item.type === "folder" ? "Folder" : "File"} permanently deleted.`
+        );
+      } catch (error: any) {
+        console.error(
+          "Permanent delete error:",
+          error
+        );
 
-      setModalType(null);
-      setModalItem(null);
-    } catch (err) {
-      console.error(
-        "Permanent delete error:",
-        err
-      );
+        showToast(
+          "error",
+          error?.message ||
+            "Unable to permanently delete item."
+        );
+      } finally {
+        setDeleteId(null);
+        setActionLoading(false);
+      }
+    };
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to permanently delete file"
-      );
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  const restoreSelected =
+    async () => {
+      if (
+        selectedItems.length === 0 ||
+        actionLoading
+      ) {
+        return;
+      }
 
-  const restoreSelected = async () => {
-    if (selectedIds.size === 0) {
-      return;
-    }
-
-    try {
       setActionLoading(true);
-      setError(null);
 
-      const ids =
-        Array.from(selectedIds);
+      try {
+        const selected =
+          [...selectedItems];
 
-      await Promise.all(
-        ids.map((id) =>
-          apiRequest(
-            `/api/trash/${encodeURIComponent(
-              id
-            )}/restore`,
+        for (const item of selected) {
+          await apiRequest(
+            `/api/trash/${item.id}/restore`,
             {
               method: "POST",
             }
+          );
+        }
+
+        const selectedSet =
+          new Set(
+            selected.map(
+              (item) => item.id
+            )
+          );
+
+        setItems((previous) =>
+          previous.filter(
+            (item) =>
+              !selectedSet.has(item.id)
           )
-        )
-      );
+        );
 
-      setItems((previous) =>
-        previous.filter(
-          (item) =>
-            !selectedIds.has(item.id)
-        )
-      );
+        setSelectedIds(new Set());
 
-      setSelectedIds(
-        new Set()
-      );
+        showToast(
+          "success",
+          `${selected.length} item${
+            selected.length > 1
+              ? "s"
+              : ""
+          } restored successfully.`
+        );
+      } catch (error: any) {
+        console.error(
+          "Restore selected error:",
+          error
+        );
 
-      setModalType(null);
-      setModalItem(null);
-    } catch (err) {
-      console.error(
-        "Restore selected error:",
-        err
-      );
+        showToast(
+          "error",
+          error?.message ||
+            "Unable to restore selected items."
+        );
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to restore selected files"
-      );
-    } finally {
-      setActionLoading(false);
-    }
-  };
+        await loadTrash(true);
+      } finally {
+        setActionLoading(false);
+      }
+    };
 
-  const deleteSelected = async () => {
-    if (selectedIds.size === 0) {
-      return;
-    }
+  const permanentlyDeleteSelected =
+    async () => {
+      if (
+        selectedItems.length === 0 ||
+        actionLoading
+      ) {
+        return;
+      }
 
-    try {
       setActionLoading(true);
-      setError(null);
 
-      const ids =
-        Array.from(selectedIds);
+      try {
+        const selected =
+          [...selectedItems];
 
-      await Promise.all(
-        ids.map((id) =>
-          apiRequest(
-            `/api/trash/${encodeURIComponent(
-              id
-            )}`,
+        for (const item of selected) {
+          await apiRequest(
+            `/api/trash/${item.id}`,
             {
               method: "DELETE",
             }
-          )
-        )
-      );
-
-      setItems((previous) =>
-        previous.filter(
-          (item) =>
-            !selectedIds.has(item.id)
-        )
-      );
-
-      setSelectedIds(
-        new Set()
-      );
-
-      setModalType(null);
-      setModalItem(null);
-    } catch (err) {
-      console.error(
-        "Delete selected error:",
-        err
-      );
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to permanently delete selected files"
-      );
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const emptyTrash = async () => {
-    try {
-      setActionLoading(true);
-      setError(null);
-
-      await apiRequest(
-        "/api/trash/empty",
-        {
-          method: "DELETE",
+          );
         }
-      );
 
-      setItems([]);
+        const selectedSet =
+          new Set(
+            selected.map(
+              (item) => item.id
+            )
+          );
 
-      setSelectedIds(
-        new Set()
-      );
+        setItems((previous) =>
+          previous.filter(
+            (item) =>
+              !selectedSet.has(item.id)
+          )
+        );
 
-      setModalType(null);
-      setModalItem(null);
-    } catch (err) {
-      console.error(
-        "Empty trash error:",
-        err
-      );
+        setSelectedIds(new Set());
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to empty trash"
-      );
-    } finally {
-      setActionLoading(false);
-    }
-  };
+        showToast(
+          "success",
+          `${selected.length} item${
+            selected.length > 1
+              ? "s"
+              : ""
+          } permanently deleted.`
+        );
+      } catch (error: any) {
+        console.error(
+          "Permanent selected delete error:",
+          error
+        );
 
-  const closeModal = () => {
-    if (actionLoading) {
-      return;
-    }
+        showToast(
+          "error",
+          error?.message ||
+            "Unable to delete selected items."
+        );
 
-    setModalType(null);
-    setModalItem(null);
-  };
+        await loadTrash(true);
+      } finally {
+        setActionLoading(false);
+      }
+    };
+
+  const emptyTrash =
+    async () => {
+      if (actionLoading) return;
+
+      setActionLoading(true);
+
+      try {
+        await apiRequest(
+          "/api/trash/empty",
+          {
+            method: "DELETE",
+          }
+        );
+
+        setItems([]);
+        setSelectedIds(new Set());
+        setEmptyConfirm(false);
+
+        showToast(
+          "success",
+          "Trash emptied successfully."
+        );
+      } catch (error: any) {
+        console.error(
+          "Empty trash error:",
+          error
+        );
+
+        showToast(
+          "error",
+          error?.message ||
+            "Unable to empty Trash."
+        );
+      } finally {
+        setActionLoading(false);
+      }
+    };
 
   return (
-    <DashboardShell>
-      <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-        <div className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
+      {/* =========================
+          HEADER
+      ========================= */}
 
-          {/* Header */}
-          <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-5 sm:px-6 lg:px-8">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Trash Bin
+            </h1>
 
-            <div>
-              <div className="flex items-center gap-3">
-
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm dark:bg-white dark:text-slate-900">
-                  <Trash2 size={22} />
-                </div>
-
-                <div>
-                  <h1 className="text-2xl font-bold tracking-tight">
-                    Trash
-                  </h1>
-
-                  <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
-                    Files deleted from your storage
-                  </p>
-                </div>
-
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-
-              <button
-                type="button"
-                onClick={() =>
-                  loadTrash(true)
-                }
-                disabled={
-                  loading ||
-                  refreshing
-                }
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              >
-                <RefreshCw
-                  size={16}
-                  className={
-                    refreshing
-                      ? "animate-spin"
-                      : ""
-                  }
-                />
-
-                Refresh
-              </button>
-
-              {items.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setModalType("empty");
-                    setModalItem(null);
-                  }}
-                  disabled={
-                    actionLoading
-                  }
-                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-3.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Trash2 size={16} />
-
-                  Empty Trash
-                </button>
-              )}
-
-            </div>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Deleted files and folders
+            </p>
           </div>
 
-          {/* Error */}
-          {error && (
-            <div className="mb-5 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
-
-              <AlertTriangle
-                size={18}
-                className="mt-0.5 shrink-0"
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                loadTrash(true)
+              }
+              disabled={refreshing}
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  refreshing
+                    ? "animate-spin"
+                    : ""
+                }`}
               />
 
-              <div className="flex-1">
+              <span className="hidden sm:inline">
+                Refresh
+              </span>
+            </button>
 
-                <p className="font-semibold">
-                  Something went wrong
-                </p>
-
-                <p className="mt-0.5">
-                  {error}
-                </p>
-
-              </div>
-
+            {items.length > 0 && (
               <button
                 type="button"
                 onClick={() =>
-                  setError(null)
+                  setEmptyConfirm(true)
                 }
-                className="rounded-md p-1 transition hover:bg-red-100 dark:hover:bg-red-900/30"
+                disabled={actionLoading}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-medium text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <X size={16} />
+                <Trash2 className="h-4 w-4" />
+
+                <span className="hidden sm:inline">
+                  Empty Trash
+                </span>
               </button>
+            )}
+          </div>
+        </div>
+      </div>
 
-            </div>
-          )}
+      {/* =========================
+          TOOLBAR
+      ========================= */}
 
-          {/* Search / Toolbar */}
-          <div className="mb-5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="relative w-full lg:max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-
-              <div className="relative w-full xl:max-w-md">
-
-                <Search
-                  size={18}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(event) =>
-                    setSearchQuery(
-                      event.target.value
-                    )
-                  }
-                  placeholder="Search trash..."
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-10 pr-9 text-sm outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white dark:border-slate-700 dark:bg-slate-950 dark:focus:border-slate-500 dark:focus:bg-slate-950"
-                />
-
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSearchQuery("")
-                    }
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                  >
-                    <X size={15} />
-                  </button>
-                )}
-
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-
-                {filteredItems.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={
-                      toggleSelectAll
-                    }
-                    className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-                  >
-                    <span
-                      className={`flex h-4 w-4 items-center justify-center rounded border ${
-                        allVisibleSelected
-                          ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900"
-                          : "border-slate-300 dark:border-slate-600"
-                      }`}
-                    >
-                      {allVisibleSelected && (
-                        <Check size={11} />
-                      )}
-                    </span>
-
-                    Select all
-                  </button>
-                )}
-
-                <div className="flex h-10 items-center rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-950">
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setViewMode("grid")
-                    }
-                    className={`flex h-8 w-9 items-center justify-center rounded-md transition ${
-                      viewMode === "grid"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white"
-                        : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                    }`}
-                    aria-label="Grid view"
-                  >
-                    <Grid2X2 size={17} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setViewMode("list")
-                    }
-                    className={`flex h-8 w-9 items-center justify-center rounded-md transition ${
-                      viewMode === "list"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-white"
-                        : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                    }`}
-                    aria-label="List view"
-                  >
-                    <List size={18} />
-                  </button>
-
-                </div>
-              </div>
+              <input
+                type="text"
+                value={search}
+                onChange={(
+                  event: ChangeEvent<HTMLInputElement>
+                ) =>
+                  setSearch(
+                    event.target.value
+                  )
+                }
+                placeholder="Search trash..."
+                className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm outline-none transition focus:border-slate-400 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:focus:border-slate-500 dark:focus:bg-slate-800"
+              />
             </div>
 
-            {/* Selected actions */}
-            {selectedCount > 0 && (
-              <div className="mt-3 flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700 dark:bg-slate-950">
-
-                <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
-
-                  <div className="flex h-7 min-w-7 items-center justify-center rounded-md bg-slate-900 px-2 text-xs font-bold text-white dark:bg-white dark:text-slate-900">
-                    {selectedCount}
-                  </div>
-
-                  selected
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-
+            <div className="flex items-center justify-between gap-3">
+              {selectedItems.length >
+                0 && (
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={
@@ -1083,379 +957,131 @@ export default function TrashPage() {
                     disabled={
                       actionLoading
                     }
-                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
                   >
-                    {actionLoading ? (
-                      <Loader2
-                        size={15}
-                        className="animate-spin"
-                      />
-                    ) : (
-                      <RotateCcw
-                        size={15}
-                      />
-                    )}
-
+                    <RotateCcw className="h-4 w-4" />
                     Restore
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setModalType(
-                        "delete"
-                      );
-                      setModalItem(null);
-                    }}
+                    onClick={
+                      permanentlyDeleteSelected
+                    }
                     disabled={
                       actionLoading
                     }
-                    className="inline-flex h-9 items-center gap-2 rounded-lg bg-red-600 px-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+                    className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-200 px-3 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950/40"
                   >
-                    <Trash2 size={15} />
-
-                    Delete permanently
+                    <Trash2 className="h-4 w-4" />
+                    Delete
                   </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSelectedIds(
-                        new Set()
-                      )
-                    }
-                    className="inline-flex h-9 items-center justify-center rounded-lg border border-transparent px-2.5 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                    aria-label="Clear selection"
-                  >
-                    <X size={16} />
-                  </button>
-
                 </div>
-              </div>
-            )}
-          </div>
-
-          {/* Loading */}
-          {loading ? (
-            <div className="flex min-h-[420px] items-center justify-center rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-
-              <div className="flex flex-col items-center gap-3 text-center">
-
-                <Loader2
-                  size={30}
-                  className="animate-spin text-slate-500"
-                />
-
-                <p className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                  Loading trash...
-                </p>
-
-              </div>
-            </div>
-          ) : items.length === 0 ? (
-
-            /* Empty Trash */
-            <div className="flex min-h-[480px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-6 text-center dark:border-slate-700 dark:bg-slate-900">
-
-              <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
-
-                <Trash2
-                  size={34}
-                  className="text-slate-400"
-                />
-
-              </div>
-
-              <h2 className="text-xl font-bold">
-                Trash is empty
-              </h2>
-
-              <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                Files you delete will appear here.
-                You can restore them or permanently
-                delete them from this page.
-              </p>
-
-            </div>
-          ) : filteredItems.length === 0 ? (
-
-            /* No Search Results */
-            <div className="flex min-h-[420px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-white px-6 text-center dark:border-slate-800 dark:bg-slate-900">
-
-              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
-
-                <Search
-                  size={28}
-                  className="text-slate-400"
-                />
-
-              </div>
-
-              <h2 className="text-lg font-bold">
-                No files found
-              </h2>
-
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Try a different search term.
-              </p>
-
-            </div>
-          ) : viewMode === "grid" ? (
-
-            /* GRID */
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-
-              {filteredItems.map(
-                (item) => {
-                  const Icon =
-                    getFileIcon(
-                      item.type
-                    );
-
-                  const selected =
-                    selectedIds.has(
-                      item.id
-                    );
-
-                  return (
-                    <div
-                      key={item.id}
-                      className={`group relative overflow-hidden rounded-xl border bg-white transition dark:bg-slate-900 ${
-                        selected
-                          ? "border-slate-900 ring-1 ring-slate-900 dark:border-white dark:ring-white"
-                          : "border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700"
-                      }`}
-                    >
-
-                      {/* Selection */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          toggleSelection(
-                            item.id
-                          )
-                        }
-                        className={`absolute left-3 top-3 z-10 flex h-5 w-5 items-center justify-center rounded border transition ${
-                          selected
-                            ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900"
-                            : "border-slate-300 bg-white/90 text-transparent hover:border-slate-500 dark:border-slate-600 dark:bg-slate-900/90"
-                        }`}
-                        aria-label={
-                          selected
-                            ? "Unselect file"
-                            : "Select file"
-                        }
-                      >
-                        <Check size={12} />
-                      </button>
-
-                      {/* Menu */}
-                      <div className="absolute right-3 top-3 z-20">
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setShowMenu(
-                              showMenu ===
-                                item.id
-                                ? null
-                                : item.id
-                            )
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-slate-500 shadow-sm transition hover:bg-slate-100 hover:text-slate-900 dark:bg-slate-800/90 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"
-                        >
-                          <MoreHorizontal
-                            size={17}
-                          />
-                        </button>
-
-                        {showMenu ===
-                          item.id && (
-                          <div className="absolute right-0 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openRestoreModal(
-                                  item
-                                )
-                              }
-                              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                            >
-                              <RotateCcw
-                                size={15}
-                              />
-
-                              Restore
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openDeleteModal(
-                                  item
-                                )
-                              }
-                              className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-red-600 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                            >
-                              <Trash2
-                                size={15}
-                              />
-
-                              Delete permanently
-                            </button>
-
-                          </div>
-                        )}
-
-                      </div>
-
-                      {/* File preview area */}
-                      <div className="flex h-44 items-center justify-center bg-slate-50 dark:bg-slate-950">
-
-                        <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-
-                          <Icon
-                            size={40}
-                            strokeWidth={1.5}
-                            className="text-slate-400"
-                          />
-
-                        </div>
-
-                      </div>
-
-                      {/* Details */}
-                      <div className="p-4">
-
-                        <div className="min-w-0 pr-2">
-
-                          <h3
-                            title={item.name}
-                            className="truncate text-sm font-semibold text-slate-900 dark:text-white"
-                          >
-                            {item.name}
-                          </h3>
-
-                          <div className="mt-1.5 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-
-                            <span>
-                              {getTypeLabel(
-                                item.type
-                              )}
-                            </span>
-
-                            <span>•</span>
-
-                            <span>
-                              {item.size}
-                            </span>
-
-                          </div>
-
-                          <div className="mt-2 flex items-center gap-1.5 text-xs text-slate-400">
-
-                            <Trash2
-                              size={12}
-                            />
-
-                            <span>
-                              Deleted{" "}
-                              {formatDeletedDate(
-                                item.deletedAt
-                              )}
-                            </span>
-
-                          </div>
-
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-2 gap-2">
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openRestoreModal(
-                                item
-                              )
-                            }
-                            disabled={
-                              actionLoading
-                            }
-                            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                          >
-                            <RotateCcw
-                              size={14}
-                            />
-
-                            Restore
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openDeleteModal(
-                                item
-                              )
-                            }
-                            disabled={
-                              actionLoading
-                            }
-                            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-red-600 text-xs font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
-                          >
-                            <Trash2
-                              size={14}
-                            />
-
-                            Delete
-                          </button>
-
-                        </div>
-                      </div>
-
-                    </div>
-                  );
-                }
               )}
 
+              <div className="flex items-center rounded-lg border border-slate-200 p-1 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setViewMode("list")
+                  }
+                  className={`rounded-md p-2 transition ${
+                    viewMode === "list"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  }`}
+                  title="List view"
+                >
+                  <List className="h-4 w-4" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setViewMode("grid")
+                  }
+                  className={`rounded-md p-2 transition ${
+                    viewMode === "grid"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  }`}
+                  title="Grid view"
+                >
+                  <Grid2X2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
+          </div>
+        </div>
 
-          ) : (
+        {/* =========================
+            CONTENT
+        ========================= */}
 
-            /* LIST */
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="mt-5">
+          {loading ? (
+            <div className="flex min-h-[400px] items-center justify-center rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex flex-col items-center gap-3 text-slate-500">
+                <Loader2 className="h-7 w-7 animate-spin" />
 
-              <div className="hidden grid-cols-[40px_minmax(240px,1.7fr)_120px_130px_170px_120px] items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+                <p className="text-sm">
+                  Loading Trash...
+                </p>
+              </div>
+            </div>
+          ) : filteredItems.length ===
+            0 ? (
+            <div className="flex min-h-[400px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white px-6 text-center dark:border-slate-700 dark:bg-slate-900">
+              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
+                <Archive className="h-8 w-8 text-slate-400" />
+              </div>
 
-                <div />
+              <h2 className="text-lg font-semibold">
+                {search
+                  ? "No items found"
+                  : "Trash is empty"}
+              </h2>
 
+              <p className="mt-1 max-w-md text-sm text-slate-500 dark:text-slate-400">
+                {search
+                  ? "Try a different search term."
+                  : "Deleted files and folders will appear here."}
+              </p>
+            </div>
+          ) : viewMode ===
+            "list" ? (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              {/* TABLE HEADER */}
+
+              <div className="hidden grid-cols-[48px_minmax(0,1fr)_140px_180px_120px_90px] items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-400">
                 <div>
-                  Name
+                  <input
+                    type="checkbox"
+                    checked={
+                      allSelected
+                    }
+                    onChange={
+                      toggleSelectAll
+                    }
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
                 </div>
 
-                <div>
-                  Type
-                </div>
-
-                <div>
-                  Size
-                </div>
-
-                <div>
-                  Deleted
-                </div>
-
+                <div>Name</div>
+                <div>Type</div>
+                <div>Deleted</div>
+                <div>Size</div>
                 <div className="text-right">
-                  Action
+                  Actions
                 </div>
-
               </div>
 
               {filteredItems.map(
                 (item) => {
                   const Icon =
                     getFileIcon(
-                      item.type
+                      item.type,
+                      item.fileType
                     );
 
                   const selected =
@@ -1463,98 +1089,295 @@ export default function TrashPage() {
                       item.id
                     );
 
+                  const restoring =
+                    restoreId ===
+                    item.id;
+
+                  const deleting =
+                    deleteId ===
+                    item.id;
+
                   return (
                     <div
-                      key={item.id}
-                      className={`grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 dark:border-slate-800 md:grid-cols-[40px_minmax(240px,1.7fr)_120px_130px_170px_120px] ${
+                      key={`${item.type}-${item.id}`}
+                      className={`group border-b border-slate-100 px-4 py-3 last:border-b-0 dark:border-slate-800 ${
                         selected
                           ? "bg-slate-50 dark:bg-slate-800/50"
                           : ""
                       }`}
                     >
+                      {/* DESKTOP */}
 
-                      {/* checkbox */}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          toggleSelection(
-                            item.id
-                          )
-                        }
-                        className={`flex h-5 w-5 items-center justify-center rounded border ${
-                          selected
-                            ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900"
-                            : "border-slate-300 text-transparent dark:border-slate-600"
-                        }`}
-                      >
-                        <Check size={12} />
-                      </button>
-
-                      {/* name */}
-                      <div className="flex min-w-0 items-center gap-3">
-
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
-
-                          <Icon
-                            size={20}
-                            className="text-slate-400"
+                      <div className="hidden grid-cols-[48px_minmax(0,1fr)_140px_180px_120px_90px] items-center gap-3 md:grid">
+                        <div>
+                          <input
+                            type="checkbox"
+                            checked={
+                              selected
+                            }
+                            onChange={() =>
+                              toggleSelect(
+                                item.id
+                              )
+                            }
+                            className="h-4 w-4 rounded border-slate-300"
                           />
-
                         </div>
 
-                        <div className="min-w-0">
-
-                          <p
-                            title={item.name}
-                            className="truncate text-sm font-semibold text-slate-900 dark:text-white"
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div
+                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                              item.type ===
+                              "folder"
+                                ? "bg-slate-100 dark:bg-slate-800"
+                                : "bg-slate-100 dark:bg-slate-800"
+                            }`}
                           >
+                            <Icon className="h-5 w-5 text-slate-500" />
+                          </div>
+
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
+                              {item.name}
+                            </p>
+
+                            <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                              {item.type ===
+                              "folder"
+                                ? "Deleted folder"
+                                : item.fileType ||
+                                  "File"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="text-sm text-slate-600 dark:text-slate-300">
+                          {getTypeLabel(
+                            item.type
+                          )}
+                        </div>
+
+                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                          {formatDeletedDate(
+                            item.deletedAt
+                          )}
+                        </div>
+
+                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                          {item.size}
+                        </div>
+
+                        <div className="flex justify-end">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                restoreItem(
+                                  item
+                                )
+                              }
+                              disabled={
+                                actionLoading
+                              }
+                              title="Restore"
+                              className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                              {restoring ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RotateCcw className="h-4 w-4" />
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDeleteConfirm(
+                                  item
+                                )
+                              }
+                              disabled={
+                                actionLoading
+                              }
+                              title="Delete permanently"
+                              className="rounded-lg p-2 text-slate-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/30"
+                            >
+                              {deleting ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* MOBILE */}
+
+                      <div className="flex items-center gap-3 md:hidden">
+                        <input
+                          type="checkbox"
+                          checked={
+                            selected
+                          }
+                          onChange={() =>
+                            toggleSelect(
+                              item.id
+                            )
+                          }
+                          className="h-4 w-4 shrink-0 rounded border-slate-300"
+                        />
+
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                          <Icon className="h-5 w-5 text-slate-500" />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
                             {item.name}
                           </p>
 
-                          <p className="mt-0.5 truncate text-xs text-slate-400">
-                            Deleted item
+                          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                            {getTypeLabel(
+                              item.type
+                            )}{" "}
+                            •{" "}
+                            {item.size}
                           </p>
-
                         </div>
-                      </div>
-
-                      {/* type */}
-                      <div className="hidden text-sm text-slate-500 dark:text-slate-400 md:block">
-                        {getTypeLabel(
-                          item.type
-                        )}
-                      </div>
-
-                      {/* size */}
-                      <div className="hidden text-sm text-slate-500 dark:text-slate-400 md:block">
-                        {item.size}
-                      </div>
-
-                      {/* deleted */}
-                      <div className="hidden text-sm text-slate-500 dark:text-slate-400 md:block">
-                        {formatDeletedDate(
-                          item.deletedAt
-                        )}
-                      </div>
-
-                      {/* actions */}
-                      <div className="flex items-center justify-end gap-1.5">
 
                         <button
                           type="button"
                           onClick={() =>
-                            openRestoreModal(
+                            restoreItem(
                               item
                             )
                           }
                           disabled={
                             actionLoading
                           }
-                          className="hidden h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50 sm:inline-flex dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
                         >
-                          <RotateCcw
-                            size={13}
-                          />
+                          {restoring ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-4 w-4" />
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDeleteConfirm(
+                              item
+                            )
+                          }
+                          disabled={
+                            actionLoading
+                          }
+                          className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30"
+                        >
+                          <MoreHorizontal className="h-5 w-5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+            </div>
+          ) : (
+            /* =========================
+               GRID VIEW
+            ========================= */
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filteredItems.map(
+                (item) => {
+                  const Icon =
+                    getFileIcon(
+                      item.type,
+                      item.fileType
+                    );
+
+                  const selected =
+                    selectedIds.has(
+                      item.id
+                    );
+
+                  const restoring =
+                    restoreId ===
+                    item.id;
+
+                  return (
+                    <div
+                      key={`${item.type}-${item.id}`}
+                      className={`relative rounded-xl border bg-white p-4 shadow-sm transition dark:bg-slate-900 ${
+                        selected
+                          ? "border-slate-400 ring-2 ring-slate-200 dark:border-slate-600 dark:ring-slate-800"
+                          : "border-slate-200 dark:border-slate-800"
+                      }`}
+                    >
+                      <div className="absolute right-3 top-3">
+                        <input
+                          type="checkbox"
+                          checked={
+                            selected
+                          }
+                          onChange={() =>
+                            toggleSelect(
+                              item.id
+                            )
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                      </div>
+
+                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800">
+                        <Icon className="h-6 w-6 text-slate-500" />
+                      </div>
+
+                      <div className="mt-4">
+                        <h3 className="truncate pr-7 text-sm font-semibold">
+                          {item.name}
+                        </h3>
+
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          {getTypeLabel(
+                            item.type
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Deleted{" "}
+                          {formatDeletedDate(
+                            item.deletedAt
+                          )}
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Size:{" "}
+                          {item.size}
+                        </p>
+                      </div>
+
+                      <div className="mt-4 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            restoreItem(
+                              item
+                            )
+                          }
+                          disabled={
+                            actionLoading
+                          }
+                          className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                        >
+                          {restoring ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-4 w-4" />
+                          )}
 
                           Restore
                         </button>
@@ -1562,311 +1385,208 @@ export default function TrashPage() {
                         <button
                           type="button"
                           onClick={() =>
-                            openDeleteModal(
+                            setDeleteConfirm(
                               item
                             )
                           }
                           disabled={
                             actionLoading
                           }
-                          className="hidden h-8 items-center gap-1.5 rounded-lg bg-red-600 px-2.5 text-xs font-semibold text-white transition hover:bg-red-700 disabled:opacity-50 sm:inline-flex"
+                          className="flex h-9 w-9 items-center justify-center rounded-lg border border-red-200 text-red-600 transition hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950/30"
+                          title="Delete permanently"
                         >
-                          <Trash2
-                            size={13}
-                          />
-
-                          Delete
+                          <Trash2 className="h-4 w-4" />
                         </button>
-
-                        <div className="relative sm:hidden">
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setShowMenu(
-                                showMenu ===
-                                  item.id
-                                  ? null
-                                  : item.id
-                              )
-                            }
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 dark:border-slate-700 dark:text-slate-400"
-                          >
-                            <MoreHorizontal
-                              size={16}
-                            />
-                          </button>
-
-                          {showMenu ===
-                            item.id && (
-                            <div className="absolute right-0 z-30 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-slate-700 dark:bg-slate-900">
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  openRestoreModal(
-                                    item
-                                  )
-                                }
-                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                              >
-                                <RotateCcw
-                                  size={15}
-                                />
-
-                                Restore
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  openDeleteModal(
-                                    item
-                                  )
-                                }
-                                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                              >
-                                <Trash2
-                                  size={15}
-                                />
-
-                                Delete permanently
-                              </button>
-
-                            </div>
-                          )}
-
-                        </div>
-
                       </div>
                     </div>
                   );
                 }
               )}
-
             </div>
           )}
+        </div>
+      </div>
 
-          {/* Footer */}
-          {!loading &&
-            items.length > 0 && (
-              <div className="mt-4 flex flex-col gap-2 text-xs text-slate-400 sm:flex-row sm:items-center sm:justify-between">
+      {/* =========================
+          DELETE MODAL
+      ========================= */}
 
-                <span>
-                  {filteredItems.length} of{" "}
-                  {items.length} item
-                  {items.length !== 1
-                    ? "s"
-                    : ""}
-                </span>
-
-                <span className="flex items-center gap-1.5">
-                  <HardDrive size={13} />
-                  Trash storage
-                </span>
-
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-950/40">
+                <Trash2 className="h-5 w-5 text-red-600" />
               </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setDeleteConfirm(
+                    null
+                  )
+                }
+                disabled={actionLoading}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <h2 className="mt-5 text-lg font-semibold">
+              Delete permanently?
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              <span className="font-medium text-slate-700 dark:text-slate-200">
+                "{deleteConfirm.name}"
+              </span>{" "}
+              will be permanently deleted. This
+              action cannot be undone.
+            </p>
+
+            {deleteConfirm.type ===
+              "folder" && (
+              <p className="mt-2 text-xs text-red-500">
+                This is a folder. Its deleted
+                contents may also be permanently
+                removed by the backend.
+              </p>
             )}
 
-        </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  setDeleteConfirm(
+                    null
+                  )
+                }
+                disabled={actionLoading}
+                className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
 
-        {/* Overlay for open menu */}
-        {showMenu && (
-          <button
-            type="button"
-            aria-label="Close menu"
-            onClick={() =>
-              setShowMenu(null)
-            }
-            className="fixed inset-0 z-10 cursor-default"
-          />
-        )}
+              <button
+                type="button"
+                onClick={
+                  permanentlyDeleteItem
+                }
+                disabled={actionLoading}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {actionLoading && (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
 
-        {/* Confirmation Modal */}
-        {modalType && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-
-            <div
-              className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
-              onClick={(event) =>
-                event.stopPropagation()
-              }
-            >
-
-              {/* Modal header */}
-              <div className="flex items-start gap-4 px-6 pb-4 pt-6">
-
-                <div
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-                    modalType ===
-                    "restore"
-                      ? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                      : "bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400"
-                  }`}
-                >
-                  {modalType ===
-                  "restore" ? (
-                    <RotateCcw
-                      size={21}
-                    />
-                  ) : (
-                    <AlertTriangle
-                      size={21}
-                    />
-                  )}
-                </div>
-
-                <div className="min-w-0 flex-1">
-
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-
-                    {modalType ===
-                    "restore"
-                      ? "Restore file?"
-                      : modalType ===
-                        "empty"
-                      ? "Empty Trash?"
-                      : "Delete permanently?"}
-
-                  </h2>
-
-                  <p className="mt-1.5 text-sm leading-6 text-slate-500 dark:text-slate-400">
-
-                    {modalType ===
-                    "restore"
-                      ? `“${
-                          modalItem?.name ||
-                          "This file"
-                        }” will be moved back to My Files.`
-                      : modalType ===
-                        "empty"
-                      ? "All files currently in Trash will be permanently deleted. This action cannot be undone."
-                      : modalItem
-                      ? `“${modalItem.name}” will be permanently deleted. This action cannot be undone.`
-                      : `${selectedCount} selected files will be permanently deleted. This action cannot be undone.`}
-
-                  </p>
-
-                </div>
-
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={
-                    actionLoading
-                  }
-                  className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                >
-                  <X size={18} />
-                </button>
-
-              </div>
-
-              {/* Modal actions */}
-              <div className="flex flex-col-reverse gap-2 border-t border-slate-100 bg-slate-50 px-6 py-4 sm:flex-row sm:justify-end dark:border-slate-800 dark:bg-slate-950">
-
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={
-                    actionLoading
-                  }
-                  className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="button"
-                  disabled={
-                    actionLoading
-                  }
-                  onClick={() => {
-
-                    if (
-                      modalType ===
-                      "restore" &&
-                      modalItem
-                    ) {
-                      restoreItem(
-                        modalItem.id
-                      );
-                      return;
-                    }
-
-                    if (
-                      modalType ===
-                      "delete" &&
-                      modalItem
-                    ) {
-                      permanentlyDelete(
-                        modalItem.id
-                      );
-                      return;
-                    }
-
-                    if (
-                      modalType ===
-                      "delete" &&
-                      !modalItem
-                    ) {
-                      deleteSelected();
-                      return;
-                    }
-
-                    if (
-                      modalType ===
-                      "empty"
-                    ) {
-                      emptyTrash();
-                    }
-
-                  }}
-                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                    modalType ===
-                    "restore"
-                      ? "bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-                      : "bg-red-600 hover:bg-red-700"
-                  }`}
-                >
-
-                  {actionLoading ? (
-                    <>
-                      <Loader2
-                        size={16}
-                        className="animate-spin"
-                      />
-
-                      Processing...
-                    </>
-                  ) : modalType ===
-                    "restore" ? (
-                    <>
-                      <RotateCcw
-                        size={16}
-                      />
-
-                      Restore
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 size={16} />
-
-                      {modalType ===
-                      "empty"
-                        ? "Empty Trash"
-                        : "Delete permanently"}
-                    </>
-                  )}
-
-                </button>
-
-              </div>
+                Delete permanently
+              </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-      </div>
-    </DashboardShell>
+      {/* =========================
+          EMPTY TRASH MODAL
+      ========================= */}
+
+      {emptyConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-950/40">
+              <Trash2 className="h-6 w-6 text-red-600" />
+            </div>
+
+            <h2 className="mt-5 text-lg font-semibold">
+              Empty Trash?
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              All files and folders in Trash will
+              be permanently deleted. This action
+              cannot be undone.
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  setEmptyConfirm(
+                    false
+                  )
+                }
+                disabled={actionLoading}
+                className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={
+                  emptyTrash
+                }
+                disabled={actionLoading}
+                className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {actionLoading && (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
+
+                Empty Trash
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================
+          TOAST
+      ========================= */}
+
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-[60]">
+          <div
+            className={`flex max-w-sm items-center gap-3 rounded-xl border px-4 py-3 shadow-lg ${
+              toast.type ===
+              "success"
+                ? "border-emerald-200 bg-white text-slate-800 dark:border-emerald-900 dark:bg-slate-900 dark:text-white"
+                : "border-red-200 bg-white text-slate-800 dark:border-red-900 dark:bg-slate-900 dark:text-white"
+            }`}
+          >
+            <div
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                toast.type ===
+                "success"
+                  ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40"
+                  : "bg-red-100 text-red-600 dark:bg-red-950/40"
+              }`}
+            >
+              {toast.type ===
+              "success" ? (
+                <Check className="h-4 w-4" />
+              ) : (
+                <X className="h-4 w-4" />
+              )}
+            </div>
+
+            <p className="text-sm font-medium">
+              {toast.message}
+            </p>
+
+            <button
+              type="button"
+              onClick={() =>
+                setToast(null)
+              }
+              className="ml-2 rounded-md p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
