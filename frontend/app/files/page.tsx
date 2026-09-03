@@ -3,14 +3,17 @@
 import {
   Archive,
   ChevronDown,
+  ChevronLeft,
   Download,
   File,
   FileImage,
   FileText,
   Folder,
+  FolderOpen,
   FolderPlus,
   Grid2X2,
   HardDrive,
+  Home,
   List,
   MoreHorizontal,
   Search,
@@ -19,17 +22,42 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import DashboardShell from "../components/DashboardShell";
+
+/* =========================================================
+   TYPES
+========================================================= */
+
+type FileType =
+  | "folder"
+  | "pdf"
+  | "image"
+  | "document"
+  | "zip";
 
 type FileItem = {
   id: number;
   name: string;
-  type: "folder" | "pdf" | "image" | "document" | "zip";
+  type: FileType;
   size: string;
   modified: string;
+
+  /*
+   * parentId tells us which folder this item belongs to.
+   * null = root / My Files
+   */
+  parentId: number | null;
 };
+
+/* =========================================================
+   INITIAL FILES
+========================================================= */
 
 const initialFiles: FileItem[] = [
   {
@@ -38,57 +66,151 @@ const initialFiles: FileItem[] = [
     type: "folder",
     size: "—",
     modified: "Today",
+    parentId: null,
   },
+
   {
     id: 2,
     name: "Project Report.pdf",
     type: "pdf",
     size: "2.4 MB",
     modified: "Today",
+    parentId: null,
   },
+
   {
     id: 3,
     name: "Presentation.pptx",
     type: "document",
     size: "5.8 MB",
     modified: "Yesterday",
+    parentId: null,
   },
+
   {
     id: 4,
     name: "Project Images",
     type: "folder",
     size: "—",
     modified: "Yesterday",
+    parentId: null,
   },
+
   {
     id: 5,
     name: "Database.sql",
     type: "document",
     size: "1.2 MB",
     modified: "Aug 29, 2026",
+    parentId: null,
   },
+
   {
     id: 6,
     name: "Images.zip",
     type: "zip",
     size: "18.5 MB",
     modified: "Aug 28, 2026",
+    parentId: null,
   },
+
   {
     id: 7,
     name: "Profile Image.png",
     type: "image",
     size: "1.8 MB",
     modified: "Aug 27, 2026",
+    parentId: null,
   },
+
   {
     id: 8,
     name: "Resume.pdf",
     type: "pdf",
     size: "890 KB",
     modified: "Aug 25, 2026",
+    parentId: null,
+  },
+
+  /*
+   * Demo files INSIDE Documents
+   */
+
+  {
+    id: 9,
+    name: "College Notes",
+    type: "folder",
+    size: "—",
+    modified: "Today",
+    parentId: 1,
+  },
+
+  {
+    id: 10,
+    name: "Assignment.docx",
+    type: "document",
+    size: "1.4 MB",
+    modified: "Today",
+    parentId: 1,
+  },
+
+  {
+    id: 11,
+    name: "Java Notes.pdf",
+    type: "pdf",
+    size: "3.2 MB",
+    modified: "Yesterday",
+    parentId: 1,
+  },
+
+  /*
+   * Demo files INSIDE Project Images
+   */
+
+  {
+    id: 12,
+    name: "Screenshot.png",
+    type: "image",
+    size: "950 KB",
+    modified: "Yesterday",
+    parentId: 4,
+  },
+
+  {
+    id: 13,
+    name: "Dashboard.jpg",
+    type: "image",
+    size: "1.7 MB",
+    modified: "Aug 28, 2026",
+    parentId: 4,
+  },
+
+  /*
+   * Nested folder
+   */
+
+  {
+    id: 14,
+    name: "Semester 5",
+    type: "folder",
+    size: "—",
+    modified: "Today",
+    parentId: 9,
+  },
+
+  {
+    id: 15,
+    name: "DBMS.pdf",
+    type: "pdf",
+    size: "2.1 MB",
+    modified: "Today",
+    parentId: 9,
   },
 ];
+
+/* =========================================================
+   PAGE
+========================================================= */
 
 export default function FilesPage() {
   const [files, setFiles] =
@@ -102,6 +224,20 @@ export default function FilesPage() {
 
   const [sortBy, setSortBy] =
     useState("recent");
+
+  /*
+   * currentFolderId
+   *
+   * null = My Files / root
+   */
+  const [currentFolderId, setCurrentFolderId] =
+    useState<number | null>(null);
+
+  /*
+   * Folder navigation history
+   */
+  const [folderHistory, setFolderHistory] =
+    useState<number[]>([]);
 
   const [showUpload, setShowUpload] =
     useState(false);
@@ -118,12 +254,67 @@ export default function FilesPage() {
   const fileInputRef =
     useRef<HTMLInputElement>(null);
 
+  /* =======================================================
+     CURRENT FOLDER
+  ======================================================= */
+
+  const currentFolder = useMemo(() => {
+    if (currentFolderId === null) {
+      return null;
+    }
+
+    return (
+      files.find(
+        (file) =>
+          file.id === currentFolderId &&
+          file.type === "folder"
+      ) ?? null
+    );
+  }, [files, currentFolderId]);
+
+  /* =======================================================
+     CURRENT FOLDER FILES
+  ======================================================= */
+
+  const currentFiles = useMemo(() => {
+    return files.filter(
+      (file) =>
+        file.parentId === currentFolderId
+    );
+  }, [files, currentFolderId]);
+
+  /* =======================================================
+     FILTER + SORT
+  ======================================================= */
+
   const filteredFiles = useMemo(() => {
-    let result = files.filter((file) =>
+    let result = currentFiles.filter((file) =>
       file.name
         .toLowerCase()
         .includes(search.toLowerCase())
     );
+
+    /*
+     * Always keep folders above files.
+     * This feels more like File Explorer / Google Drive.
+     */
+    result.sort((a, b) => {
+      if (
+        a.type === "folder" &&
+        b.type !== "folder"
+      ) {
+        return -1;
+      }
+
+      if (
+        a.type !== "folder" &&
+        b.type === "folder"
+      ) {
+        return 1;
+      }
+
+      return 0;
+    });
 
     if (sortBy === "name") {
       result = [...result].sort((a, b) =>
@@ -133,18 +324,82 @@ export default function FilesPage() {
 
     if (sortBy === "size") {
       result = [...result].sort((a, b) =>
-        a.size.localeCompare(b.size)
+        getSizeInBytes(a.size) -
+        getSizeInBytes(b.size)
       );
     }
 
+    /*
+     * Recent is default order.
+     * Newest items are already inserted at top.
+     */
+    if (sortBy === "recent") {
+      result = [...result].sort(
+        (a, b) => b.id - a.id
+      );
+    }
+
+    /*
+     * Folders should still remain at top
+     * for recent sorting.
+     */
+    if (sortBy !== "name" && sortBy !== "size") {
+      result = [...result].sort((a, b) => {
+        if (
+          a.type === "folder" &&
+          b.type !== "folder"
+        ) {
+          return -1;
+        }
+
+        if (
+          a.type !== "folder" &&
+          b.type === "folder"
+        ) {
+          return 1;
+        }
+
+        return b.id - a.id;
+      });
+    }
+
     return result;
-  }, [files, search, sortBy]);
+  }, [
+    currentFiles,
+    search,
+    sortBy,
+  ]);
+
+  /* =======================================================
+     CREATE FOLDER
+  ======================================================= */
 
   function createFolder() {
     const cleanName =
       folderName.trim();
 
-    if (!cleanName) return;
+    if (!cleanName) {
+      return;
+    }
+
+    /*
+     * Prevent duplicate folder names
+     * inside the same folder.
+     */
+    const duplicate = files.some(
+      (file) =>
+        file.parentId === currentFolderId &&
+        file.type === "folder" &&
+        file.name.toLowerCase() ===
+          cleanName.toLowerCase()
+    );
+
+    if (duplicate) {
+      alert(
+        "A folder with this name already exists."
+      );
+      return;
+    }
 
     const newFolder: FileItem = {
       id: Date.now(),
@@ -152,6 +407,7 @@ export default function FilesPage() {
       type: "folder",
       size: "—",
       modified: "Just now",
+      parentId: currentFolderId,
     };
 
     setFiles((current) => [
@@ -163,13 +419,20 @@ export default function FilesPage() {
     setShowFolder(false);
   }
 
+  /* =======================================================
+     UPLOAD
+  ======================================================= */
+
   function handleFileUpload(
     event: React.ChangeEvent<HTMLInputElement>
   ) {
     const selected =
       event.target.files;
 
-    if (!selected || selected.length === 0) {
+    if (
+      !selected ||
+      selected.length === 0
+    ) {
       return;
     }
 
@@ -183,6 +446,13 @@ export default function FilesPage() {
             file.size
           ),
           modified: "Just now",
+
+          /*
+           * IMPORTANT:
+           * Upload goes inside the
+           * currently opened folder.
+           */
+          parentId: currentFolderId,
         })
       );
 
@@ -198,30 +468,210 @@ export default function FilesPage() {
     }
   }
 
-  function deleteFile(id: number) {
-    setFiles((current) =>
-      current.filter(
-        (file) => file.id !== id
-      )
-    );
+  /* =======================================================
+     OPEN FOLDER
+  ======================================================= */
+
+  function openFolder(folder: FileItem) {
+    if (folder.type !== "folder") {
+      setSelectedFile(folder);
+      return;
+    }
+
+    /*
+     * Save current folder in history
+     * before moving inside.
+     */
+    if (currentFolderId !== null) {
+      setFolderHistory((history) => [
+        ...history,
+        currentFolderId,
+      ]);
+    }
+
+    setCurrentFolderId(folder.id);
+
+    setSearch("");
 
     setSelectedFile(null);
   }
+
+  /* =======================================================
+     GO BACK
+  ======================================================= */
+
+  function goBack() {
+    if (folderHistory.length === 0) {
+      setCurrentFolderId(null);
+      return;
+    }
+
+    const history =
+      [...folderHistory];
+
+    const previousFolderId =
+      history.pop() ?? null;
+
+    setFolderHistory(history);
+
+    setCurrentFolderId(
+      previousFolderId
+    );
+
+    setSearch("");
+
+    setSelectedFile(null);
+  }
+
+  /* =======================================================
+     GO HOME
+  ======================================================= */
+
+  function goHome() {
+    setCurrentFolderId(null);
+    setFolderHistory([]);
+    setSearch("");
+    setSelectedFile(null);
+  }
+
+  /* =======================================================
+     DELETE
+  ======================================================= */
+
+  function deleteFile(id: number) {
+    /*
+     * Delete the selected item and
+     * everything inside it if it is
+     * a folder.
+     */
+    setFiles((current) => {
+      const idsToDelete = new Set<number>();
+
+      function collectChildren(
+        parentId: number
+      ) {
+        idsToDelete.add(parentId);
+
+        current
+          .filter(
+            (file) =>
+              file.parentId === parentId
+          )
+          .forEach((child) => {
+            if (child.type === "folder") {
+              collectChildren(child.id);
+            } else {
+              idsToDelete.add(child.id);
+            }
+          });
+      }
+
+      collectChildren(id);
+
+      return current.filter(
+        (file) =>
+          !idsToDelete.has(file.id)
+      );
+    });
+
+    /*
+     * If deleted item is current folder,
+     * go back to parent.
+     */
+    if (id === currentFolderId) {
+      goBack();
+    }
+
+    setSelectedFile(null);
+  }
+
+  /* =======================================================
+     DOUBLE CLICK
+  ======================================================= */
+
+  function handleDoubleClick(
+    file: FileItem
+  ) {
+    if (file.type === "folder") {
+      openFolder(file);
+    }
+  }
+
+  /* =======================================================
+     BREADCRUMB
+  ======================================================= */
+
+  const breadcrumb = useMemo(() => {
+    const result: FileItem[] = [];
+
+    let folder =
+      currentFolder;
+
+    while (folder) {
+      result.unshift(folder);
+
+      folder =
+        files.find(
+          (file) =>
+            file.id ===
+            folder?.parentId &&
+            file.type === "folder"
+        ) ?? null;
+    }
+
+    return result;
+  }, [
+    currentFolder,
+    files,
+  ]);
+
+  /* =======================================================
+     STORAGE
+  ======================================================= */
+
+  const totalStorageBytes =
+    10 * 1024 * 1024 * 1024;
+
+  const usedStorageBytes =
+    files.reduce((total, file) => {
+      if (file.type === "folder") {
+        return total;
+      }
+
+      return (
+        total +
+        getSizeInBytes(file.size)
+      );
+    }, 0);
+
+  const usedPercentage = Math.min(
+    100,
+    Math.round(
+      (usedStorageBytes /
+        totalStorageBytes) *
+        100
+    )
+  );
+
+  /* =======================================================
+     RENDER
+  ======================================================= */
 
   return (
     <DashboardShell>
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
 
-        {/* ================================= */}
-        {/* HEADER */}
-        {/* ================================= */}
+        {/* =================================================
+            HEADER
+        ================================================= */}
 
         <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
 
           <div>
             <div className="mb-3 flex items-center gap-2">
+
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-500/10">
-                <HardDrive className="h-4.5 w-4.5 text-blue-600 dark:text-blue-400" />
+                <HardDrive className="h-5 w-5 text-blue-600 dark:text-blue-400" />
               </div>
 
               <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
@@ -234,8 +684,7 @@ export default function FilesPage() {
             </h1>
 
             <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-              Upload, organize and manage your
-              files securely.
+              Upload, organize and manage your files securely.
             </p>
           </div>
 
@@ -262,12 +711,13 @@ export default function FilesPage() {
               <Upload className="h-4 w-4" />
               Upload
             </button>
+
           </div>
         </div>
 
-        {/* ================================= */}
-        {/* STORAGE CARD */}
-        {/* ================================= */}
+        {/* =================================================
+            STORAGE CARD
+        ================================================= */}
 
         <div className="mt-7 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
 
@@ -285,37 +735,49 @@ export default function FilesPage() {
                 </p>
 
                 <p className="mt-1 text-xs text-slate-400">
-                  3.8 GB used of 10 GB
+                  {formatStorage(
+                    usedStorageBytes
+                  )}{" "}
+                  used of 10 GB
                 </p>
               </div>
             </div>
 
             <div className="w-full sm:max-w-sm">
+
               <div className="mb-2 flex justify-between text-xs">
+
                 <span className="text-slate-400">
-                  38% used
+                  {usedPercentage}% used
                 </span>
 
                 <span className="font-medium text-slate-600 dark:text-slate-300">
-                  6.2 GB free
+                  {formatStorage(
+                    totalStorageBytes -
+                      usedStorageBytes
+                  )}{" "}
+                  free
                 </span>
+
               </div>
 
               <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-white/10">
+
                 <div
-                  className="h-full rounded-full bg-blue-600"
+                  className="h-full rounded-full bg-blue-600 transition-all"
                   style={{
-                    width: "38%",
+                    width: `${usedPercentage}%`,
                   }}
                 />
+
               </div>
             </div>
           </div>
         </div>
 
-        {/* ================================= */}
-        {/* TOOLBAR */}
-        {/* ================================= */}
+        {/* =================================================
+            TOOLBAR
+        ================================================= */}
 
         <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
 
@@ -333,6 +795,7 @@ export default function FilesPage() {
               placeholder="Search files and folders..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
             />
+
           </div>
 
           <div className="flex items-center gap-3">
@@ -340,6 +803,7 @@ export default function FilesPage() {
             {/* SORT */}
 
             <div className="relative">
+
               <select
                 value={sortBy}
                 onChange={(e) =>
@@ -347,6 +811,7 @@ export default function FilesPage() {
                 }
                 className="h-11 appearance-none rounded-xl border border-slate-200 bg-white px-4 pr-9 text-sm font-medium text-slate-700 outline-none dark:border-white/10 dark:bg-white/5 dark:text-slate-200"
               >
+
                 <option value="recent">
                   Recently Modified
                 </option>
@@ -358,9 +823,11 @@ export default function FilesPage() {
                 <option value="size">
                   Size
                 </option>
+
               </select>
 
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
             </div>
 
             {/* VIEW */}
@@ -392,31 +859,136 @@ export default function FilesPage() {
               >
                 <List className="h-4 w-4" />
               </button>
+
             </div>
+
           </div>
         </div>
 
-        {/* ================================= */}
-        {/* BREADCRUMB */}
-        {/* ================================= */}
+        {/* =================================================
+            NAVIGATION / BREADCRUMB
+        ================================================= */}
 
-        <div className="mt-6 flex items-center gap-2 text-sm">
-          <span className="font-semibold text-slate-900 dark:text-white">
+        <div className="mt-6 flex flex-wrap items-center gap-2">
+
+          {/* BACK */}
+
+          {currentFolderId !== null && (
+            <button
+              onClick={goBack}
+              className="mr-1 inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Back
+            </button>
+          )}
+
+          {/* HOME */}
+
+          <button
+            onClick={goHome}
+            className={`inline-flex items-center gap-2 text-sm font-semibold transition ${
+              currentFolderId === null
+                ? "text-slate-900 dark:text-white"
+                : "text-blue-600 hover:text-blue-700 dark:text-blue-400"
+            }`}
+          >
+            <Home className="h-4 w-4" />
             My Files
-          </span>
+          </button>
 
-          <span className="text-slate-300 dark:text-slate-700">
-            /
-          </span>
+          {breadcrumb.map(
+            (folder, index) => (
+              <div
+                key={folder.id}
+                className="flex items-center gap-2"
+              >
+                <span className="text-slate-300 dark:text-slate-700">
+                  /
+                </span>
 
-          <span className="text-slate-400">
-            All Files
-          </span>
+                <button
+                  onClick={() => {
+                    /*
+                     * Navigate directly to
+                     * breadcrumb folder.
+                     */
+                    const indexInPath =
+                      breadcrumb.findIndex(
+                        (item) =>
+                          item.id ===
+                          folder.id
+                      );
+
+                    const parentIds =
+                      breadcrumb
+                        .slice(
+                          0,
+                          indexInPath
+                        )
+                        .map(
+                          (item) =>
+                            item.id
+                        );
+
+                    setFolderHistory(
+                      parentIds
+                    );
+
+                    setCurrentFolderId(
+                      folder.id
+                    );
+
+                    setSearch("");
+                    setSelectedFile(
+                      null
+                    );
+                  }}
+                  className={`max-w-[180px] truncate text-sm ${
+                    index ===
+                    breadcrumb.length - 1
+                      ? "font-semibold text-slate-900 dark:text-white"
+                      : "font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                  }`}
+                >
+                  {folder.name}
+                </button>
+              </div>
+            )
+          )}
+
         </div>
 
-        {/* ================================= */}
-        {/* FILES */}
-        {/* ================================= */}
+        {/* =================================================
+            CURRENT FOLDER TITLE
+        ================================================= */}
+
+        {currentFolder && (
+          <div className="mt-6 flex items-center gap-3">
+
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-500/10">
+              <FolderOpen className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            </div>
+
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                {currentFolder.name}
+              </h2>
+
+              <p className="text-xs text-slate-400">
+                {currentFiles.length}{" "}
+                {currentFiles.length === 1
+                  ? "item"
+                  : "items"}
+              </p>
+            </div>
+
+          </div>
+        )}
+
+        {/* =================================================
+            FILE AREA
+        ================================================= */}
 
         {filteredFiles.length === 0 ? (
           <EmptyState
@@ -424,21 +996,44 @@ export default function FilesPage() {
             onUpload={() =>
               setShowUpload(true)
             }
+            onNewFolder={() =>
+              setShowFolder(true)
+            }
           />
         ) : view === "grid" ? (
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
-            {filteredFiles.map((file) => (
-              <FileCard
-                key={file.id}
-                file={file}
-                onClick={() =>
-                  setSelectedFile(file)
-                }
-              />
-            ))}
+          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+
+            {filteredFiles.map(
+              (file) => (
+                <FileCard
+                  key={file.id}
+                  file={file}
+                  onClick={() => {
+                    if (
+                      file.type ===
+                      "folder"
+                    ) {
+                      openFolder(file);
+                    } else {
+                      setSelectedFile(
+                        file
+                      );
+                    }
+                  }}
+                  onDoubleClick={() =>
+                    handleDoubleClick(
+                      file
+                    )
+                  }
+                />
+              )
+            )}
+
           </div>
+
         ) : (
+
           <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04]">
 
             <div className="hidden grid-cols-[1fr_140px_160px_50px] gap-4 border-b border-slate-200 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:border-white/10 md:grid">
@@ -448,21 +1043,38 @@ export default function FilesPage() {
               <span />
             </div>
 
-            {filteredFiles.map((file) => (
-              <ListFile
-                key={file.id}
-                file={file}
-                onClick={() =>
-                  setSelectedFile(file)
-                }
-              />
-            ))}
+            {filteredFiles.map(
+              (file) => (
+                <ListFile
+                  key={file.id}
+                  file={file}
+                  onClick={() => {
+                    if (
+                      file.type ===
+                      "folder"
+                    ) {
+                      openFolder(file);
+                    } else {
+                      setSelectedFile(
+                        file
+                      );
+                    }
+                  }}
+                  onDoubleClick={() =>
+                    handleDoubleClick(
+                      file
+                    )
+                  }
+                />
+              )
+            )}
+
           </div>
         )}
 
-        {/* ================================= */}
-        {/* MODALS */}
-        {/* ================================= */}
+        {/* =================================================
+            MODALS
+        ================================================= */}
 
         {showUpload && (
           <UploadModal
@@ -492,25 +1104,30 @@ export default function FilesPage() {
               setSelectedFile(null)
             }
             onDelete={() =>
-              deleteFile(selectedFile.id)
+              deleteFile(
+                selectedFile.id
+              )
             }
           />
         )}
+
       </div>
     </DashboardShell>
   );
 }
 
-/* ========================================= */
-/* FILE CARD */
-/* ========================================= */
+/* =========================================================
+   FILE CARD
+========================================================= */
 
 function FileCard({
   file,
   onClick,
+  onDoubleClick,
 }: {
   file: FileItem;
   onClick: () => void;
+  onDoubleClick: () => void;
 }) {
   const folder =
     file.type === "folder";
@@ -518,7 +1135,8 @@ function FileCard({
   return (
     <button
       onClick={onClick}
-      className="group text-left rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/30"
+      onDoubleClick={onDoubleClick}
+      className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-1 hover:border-blue-200 hover:shadow-md dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-blue-500/30"
     >
       <div className="flex items-start justify-between">
 
@@ -529,60 +1147,84 @@ function FileCard({
               : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"
           }`}
         >
-          <FileIcon type={file.type} />
+          <FileIcon
+            type={file.type}
+          />
         </div>
 
         <MoreHorizontal className="h-5 w-5 text-slate-300 transition group-hover:text-slate-500 dark:text-slate-600 dark:group-hover:text-slate-300" />
+
       </div>
 
       <div className="mt-5">
+
         <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">
           {file.name}
         </p>
 
         <div className="mt-2 flex items-center justify-between">
+
           <span className="text-xs text-slate-400">
-            {file.size}
+            {folder
+              ? "Folder"
+              : file.size}
           </span>
 
           <span className="text-xs text-slate-400">
             {file.modified}
           </span>
+
         </div>
+
       </div>
     </button>
   );
 }
 
-/* ========================================= */
-/* LIST FILE */
-/* ========================================= */
+/* =========================================================
+   LIST FILE
+========================================================= */
 
 function ListFile({
   file,
   onClick,
+  onDoubleClick,
 }: {
   file: FileItem;
   onClick: () => void;
+  onDoubleClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="grid w-full gap-3 border-b border-slate-100 px-5 py-4 text-left transition hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5 md:grid-cols-[1fr_140px_160px_50px] md:items-center md:gap-4"
+      onDoubleClick={onDoubleClick}
+      className="grid w-full gap-3 border-b border-slate-100 px-5 py-4 text-left transition last:border-0 hover:bg-slate-50 dark:border-white/5 dark:hover:bg-white/5 md:grid-cols-[1fr_140px_160px_50px] md:items-center md:gap-4"
     >
+
       <div className="flex items-center gap-3">
 
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300">
-          <FileIcon type={file.type} />
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+            file.type === "folder"
+              ? "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400"
+              : "bg-slate-100 text-slate-500 dark:bg-white/10 dark:text-slate-300"
+          }`}
+        >
+          <FileIcon
+            type={file.type}
+          />
         </div>
 
         <span className="truncate text-sm font-semibold text-slate-800 dark:text-white">
           {file.name}
         </span>
+
       </div>
 
       <span className="hidden text-xs text-slate-400 md:block">
-        {file.size}
+        {file.type === "folder"
+          ? "—"
+          : file.size}
       </span>
 
       <span className="hidden text-xs text-slate-400 md:block">
@@ -590,51 +1232,64 @@ function ListFile({
       </span>
 
       <MoreHorizontal className="hidden h-5 w-5 text-slate-400 md:block" />
+
     </button>
   );
 }
 
-/* ========================================= */
-/* FILE ICON */
-/* ========================================= */
+/* =========================================================
+   FILE ICON
+========================================================= */
 
 function FileIcon({
   type,
 }: {
-  type: FileItem["type"];
+  type: FileType;
 }) {
   if (type === "folder") {
-    return <Folder className="h-6 w-6" />;
+    return (
+      <Folder className="h-6 w-6" />
+    );
   }
 
   if (type === "image") {
-    return <FileImage className="h-6 w-6" />;
+    return (
+      <FileImage className="h-6 w-6" />
+    );
   }
 
   if (
     type === "pdf" ||
     type === "document"
   ) {
-    return <FileText className="h-6 w-6" />;
+    return (
+      <FileText className="h-6 w-6" />
+    );
   }
 
   if (type === "zip") {
-    return <Archive className="h-6 w-6" />;
+    return (
+      <Archive className="h-6 w-6" />
+    );
   }
 
-  return <File className="h-6 w-6" />;
+  return (
+    <File className="h-6 w-6" />
+  );
 }
 
-/* ========================================= */
-/* EMPTY STATE */
-/* ========================================= */
+/* =========================================================
+   EMPTY STATE
+========================================================= */
 
 function EmptyState({
   search,
   onUpload,
+  onNewFolder,
 }: {
   search: string;
   onUpload: () => void;
+  onNewFolder: () => void;
 }) {
   return (
     <div className="mt-6 flex min-h-[400px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center dark:border-white/10 dark:bg-white/[0.03]">
@@ -646,31 +1301,44 @@ function EmptyState({
       <h3 className="mt-5 text-lg font-bold text-slate-900 dark:text-white">
         {search
           ? "No files found"
-          : "Your storage is empty"}
+          : "This folder is empty"}
       </h3>
 
       <p className="mt-2 max-w-md text-sm text-slate-400">
         {search
           ? "Try searching with a different file or folder name."
-          : "Upload your first file to start using your CloudVault storage."}
+          : "Add files or create a new folder to organize your storage."}
       </p>
 
       {!search && (
-        <button
-          onClick={onUpload}
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500"
-        >
-          <Upload className="h-4 w-4" />
-          Upload File
-        </button>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+
+          <button
+            onClick={onNewFolder}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
+          >
+            <FolderPlus className="h-4 w-4" />
+            New Folder
+          </button>
+
+          <button
+            onClick={onUpload}
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+          >
+            <Upload className="h-4 w-4" />
+            Upload File
+          </button>
+
+        </div>
       )}
+
     </div>
   );
 }
 
-/* ========================================= */
-/* UPLOAD MODAL */
-/* ========================================= */
+/* =========================================================
+   UPLOAD MODAL
+========================================================= */
 
 function UploadModal({
   inputRef,
@@ -697,7 +1365,7 @@ function UploadModal({
         </h2>
 
         <p className="mt-2 text-sm text-slate-400">
-          Select one or multiple files from your device.
+          Files will be uploaded into the current folder.
         </p>
 
         <button
@@ -706,7 +1374,13 @@ function UploadModal({
           }
           className="mt-6 w-full rounded-xl border-2 border-dashed border-slate-300 px-5 py-8 text-sm font-semibold text-slate-600 transition hover:border-blue-500 hover:bg-blue-50/50 dark:border-white/10 dark:text-slate-300 dark:hover:bg-blue-500/5"
         >
+          <Upload className="mx-auto mb-3 h-6 w-6 text-slate-400" />
+
           Click to choose files
+
+          <span className="mt-2 block text-xs font-normal text-slate-400">
+            You can select multiple files
+          </span>
         </button>
 
         <input
@@ -716,14 +1390,15 @@ function UploadModal({
           className="hidden"
           onChange={onUpload}
         />
+
       </div>
     </Modal>
   );
 }
 
-/* ========================================= */
-/* FOLDER MODAL */
-/* ========================================= */
+/* =========================================================
+   FOLDER MODAL
+========================================================= */
 
 function FolderModal({
   value,
@@ -739,13 +1414,23 @@ function FolderModal({
   return (
     <Modal onClose={onClose}>
 
-      <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-        Create New Folder
-      </h2>
+      <div className="flex items-center gap-3">
 
-      <p className="mt-2 text-sm text-slate-400">
-        Give your folder a name.
-      </p>
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-500/10">
+          <FolderPlus className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+        </div>
+
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+            Create New Folder
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-400">
+            Create a folder in the current location.
+          </p>
+        </div>
+
+      </div>
 
       <input
         autoFocus
@@ -758,32 +1443,36 @@ function FolderModal({
             onCreate();
           }
         }}
-        placeholder="Folder name"
+        placeholder="e.g. College Notes"
         className="mt-6 h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
       />
 
       <div className="mt-6 flex justify-end gap-3">
+
         <button
           onClick={onClose}
-          className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:border-white/10 dark:text-slate-200"
+          className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
         >
           Cancel
         </button>
 
         <button
           onClick={onCreate}
-          className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-500"
+          disabled={!value.trim()}
+          className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Create Folder
         </button>
+
       </div>
+
     </Modal>
   );
 }
 
-/* ========================================= */
-/* FILE DETAILS MODAL */
-/* ========================================= */
+/* =========================================================
+   FILE DETAILS
+========================================================= */
 
 function FileDetailsModal({
   file,
@@ -794,32 +1483,48 @@ function FileDetailsModal({
   onClose: () => void;
   onDelete: () => void;
 }) {
+  const isFolder =
+    file.type === "folder";
+
   return (
     <Modal onClose={onClose}>
 
       <div className="flex items-start justify-between">
 
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
 
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
-            <FileIcon type={file.type} />
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+            <FileIcon
+              type={file.type}
+            />
           </div>
 
-          <div>
-            <h2 className="max-w-[230px] truncate text-lg font-bold text-slate-900 dark:text-white">
+          <div className="min-w-0">
+
+            <h2 className="truncate text-lg font-bold text-slate-900 dark:text-white">
               {file.name}
             </h2>
 
             <p className="text-xs text-slate-400">
-              {file.type === "folder"
+              {isFolder
                 ? "Folder"
                 : "File"}
             </p>
+
           </div>
         </div>
       </div>
 
       <div className="mt-6 rounded-xl bg-slate-50 p-4 dark:bg-white/5">
+
+        <DetailRow
+          label="Type"
+          value={
+            isFolder
+              ? "Folder"
+              : file.type.toUpperCase()
+          }
+        />
 
         <DetailRow
           label="Size"
@@ -835,35 +1540,44 @@ function FileDetailsModal({
           label="Status"
           value="Available"
         />
+
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-3">
+      {!isFolder && (
+        <div className="mt-6 grid grid-cols-2 gap-3">
 
-        <button className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5">
-          <Download className="h-4 w-4" />
-          Download
-        </button>
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
+          >
+            <Download className="h-4 w-4" />
+            Download
+          </button>
 
-        <button className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5">
-          <Share2 className="h-4 w-4" />
-          Share
-        </button>
-      </div>
+          <button
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-white/10 dark:text-slate-200 dark:hover:bg-white/5"
+          >
+            <Share2 className="h-4 w-4" />
+            Share
+          </button>
+
+        </div>
+      )}
 
       <button
         onClick={onDelete}
-        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10"
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10"
       >
         <Trash2 className="h-4 w-4" />
         Move to Trash
       </button>
+
     </Modal>
   );
 }
 
-/* ========================================= */
-/* DETAIL ROW */
-/* ========================================= */
+/* =========================================================
+   DETAIL ROW
+========================================================= */
 
 function DetailRow({
   label,
@@ -874,20 +1588,22 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between border-b border-slate-200 py-3 last:border-0 dark:border-white/5">
+
       <span className="text-xs text-slate-400">
         {label}
       </span>
 
-      <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+      <span className="max-w-[200px] truncate text-xs font-semibold text-slate-700 dark:text-slate-200">
         {value}
       </span>
+
     </div>
   );
 }
 
-/* ========================================= */
-/* MODAL */
-/* ========================================= */
+/* =========================================================
+   MODAL
+========================================================= */
 
 function Modal({
   children,
@@ -897,60 +1613,80 @@ function Modal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
 
-      <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-slate-900">
+      <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-white/10 dark:bg-slate-900">
 
         <button
           onClick={onClose}
-          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
+          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
         >
           <X className="h-4 w-4" />
         </button>
 
         {children}
+
       </div>
     </div>
   );
 }
 
-/* ========================================= */
-/* HELPERS */
-/* ========================================= */
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function getFileType(
   fileName: string
-): FileItem["type"] {
+): FileType {
   const extension =
     fileName
       .split(".")
       .pop()
       ?.toLowerCase();
 
-  if (
-    extension === "pdf"
-  ) {
+  if (extension === "pdf") {
     return "pdf";
   }
 
   if (
-    ["png", "jpg", "jpeg", "gif", "webp"].includes(
-      extension || ""
-    )
+    [
+      "png",
+      "jpg",
+      "jpeg",
+      "gif",
+      "webp",
+      "svg",
+      "bmp",
+    ].includes(extension || "")
   ) {
     return "image";
   }
 
   if (
-    ["zip", "rar", "7z"].includes(
-      extension || ""
-    )
+    [
+      "zip",
+      "rar",
+      "7z",
+      "tar",
+      "gz",
+    ].includes(extension || "")
   ) {
     return "zip";
   }
 
   return "document";
 }
+
+/* =========================================================
+   FILE SIZE
+========================================================= */
 
 function formatFileSize(
   bytes: number
@@ -964,6 +1700,7 @@ function formatFileSize(
     "KB",
     "MB",
     "GB",
+    "TB",
   ];
 
   const index = Math.floor(
@@ -974,7 +1711,88 @@ function formatFileSize(
   return `${(
     bytes /
     Math.pow(1024, index)
-  ).toFixed(index === 0 ? 0 : 1)} ${
-    units[index]
-  }`;
+  ).toFixed(
+    index === 0 ? 0 : 1
+  )} ${units[index]}`;
+}
+
+/* =========================================================
+   SIZE STRING -> BYTES
+========================================================= */
+
+function getSizeInBytes(
+  size: string
+) {
+  if (
+    !size ||
+    size === "—"
+  ) {
+    return 0;
+  }
+
+  const match =
+    size.match(
+      /^([\d.]+)\s*(Bytes|KB|MB|GB|TB)$/i
+    );
+
+  if (!match) {
+    return 0;
+  }
+
+  const value =
+    Number(match[1]);
+
+  const unit =
+    match[2].toUpperCase();
+
+  const multipliers: Record<
+    string,
+    number
+  > = {
+    BYTES: 1,
+    KB: 1024,
+    MB: 1024 ** 2,
+    GB: 1024 ** 3,
+    TB: 1024 ** 4,
+  };
+
+  return (
+    value *
+    (multipliers[unit] || 1)
+  );
+}
+
+/* =========================================================
+   STORAGE FORMAT
+========================================================= */
+
+function formatStorage(
+  bytes: number
+) {
+  if (bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = [
+    "B",
+    "KB",
+    "MB",
+    "GB",
+    "TB",
+  ];
+
+  const index = Math.min(
+    Math.floor(
+      Math.log(bytes) /
+        Math.log(1024)
+    ),
+    units.length - 1
+  );
+
+  return `${(
+    bytes /
+    Math.pow(1024, index)
+  ).toFixed(
+    index === 0 ? 0 : 1
+  )} ${units[index]}`;
 }
