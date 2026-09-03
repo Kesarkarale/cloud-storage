@@ -453,6 +453,9 @@ export default function FilesPage() {
   const [previewFile, setPreviewFile] =
     useState<FileItem | null>(null);
 
+  const [deleteConfirmFile, setDeleteConfirmFile] =
+    useState<FileItem | null>(null);
+
   /* -------------------------------------------------------
      UPLOAD
   ------------------------------------------------------- */
@@ -574,10 +577,6 @@ export default function FilesPage() {
           err
         );
 
-        /*
-         * Folder API failure should not prevent
-         * files from loading.
-         */
         setFolders([]);
       }
     },
@@ -1108,29 +1107,39 @@ export default function FilesPage() {
   };
 
   /* =======================================================
-     DELETE
+     DELETE CONFIRMATION
   ======================================================= */
 
-  const deleteFile = async (
+  const requestDeleteFile = (
     file: FileItem,
     event?: MouseEvent
   ) => {
     event?.stopPropagation();
 
-    const confirmed =
-      window.confirm(
-        `Delete "${file.fileName}" permanently?`
-      );
+    if (deletingId) return;
 
-    if (!confirmed) return;
+    setDeleteConfirmFile(file);
+  };
+
+  /* =======================================================
+     DELETE
+  ======================================================= */
+
+  const deleteFile = async () => {
+    if (!deleteConfirmFile) return;
+
+    const file = deleteConfirmFile;
 
     const token = getToken();
 
     if (!token) {
+      setDeleteConfirmFile(null);
+
       showToast(
         "error",
         "Please login again."
       );
+
       return;
     }
 
@@ -1157,11 +1166,15 @@ export default function FilesPage() {
         )
       );
 
+      setDeleteConfirmFile(null);
+
       setSelectedFile(null);
+
+      setPreviewFile(null);
 
       showToast(
         "success",
-        "File deleted permanently."
+        `"${file.fileName}" deleted successfully.`
       );
     } catch (err: any) {
       console.error(
@@ -1172,7 +1185,7 @@ export default function FilesPage() {
       showToast(
         "error",
         err?.message ||
-          "Unable to delete file."
+          "Unable to delete file. Please try again."
       );
     } finally {
       setDeletingId(null);
@@ -1715,7 +1728,7 @@ export default function FilesPage() {
                               downloadFile
                             }
                             onDelete={
-                              deleteFile
+                              requestDeleteFile
                             }
                             downloading={
                               downloadingId ===
@@ -1750,7 +1763,7 @@ export default function FilesPage() {
                               downloadFile
                             }
                             onDelete={
-                              deleteFile
+                              requestDeleteFile
                             }
                             downloading={
                               downloadingId ===
@@ -2051,7 +2064,7 @@ export default function FilesPage() {
           }
           onPreview={openPreview}
           onDownload={downloadFile}
-          onDelete={deleteFile}
+          onDelete={requestDeleteFile}
           downloading={
             downloadingId ===
             selectedFile.id
@@ -2080,6 +2093,26 @@ export default function FilesPage() {
             downloadingId ===
             previewFile.id
           }
+        />
+      )}
+
+      {/* ===================================================
+          DELETE CONFIRMATION MODAL
+      =================================================== */}
+
+      {deleteConfirmFile && (
+        <DeleteConfirmModal
+          file={deleteConfirmFile}
+          deleting={
+            deletingId ===
+            deleteConfirmFile.id
+          }
+          onCancel={() => {
+            if (!deletingId) {
+              setDeleteConfirmFile(null);
+            }
+          }}
+          onConfirm={deleteFile}
         />
       )}
 
@@ -2159,6 +2192,116 @@ function Modal({
 
         <div className="p-5">
           {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   DELETE CONFIRMATION MODAL
+========================================================= */
+
+function DeleteConfirmModal({
+  file,
+  deleting,
+  onCancel,
+  onConfirm,
+}: {
+  file: FileItem;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          !deleting
+        ) {
+          onCancel();
+        }
+      }}
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-file-title"
+      >
+        <div className="flex justify-center pt-7">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400">
+            <Trash2 size={25} />
+          </div>
+        </div>
+
+        <div className="px-6 pb-5 pt-5 text-center">
+          <h2
+            id="delete-file-title"
+            className="text-lg font-bold text-slate-900 dark:text-white"
+          >
+            Delete file?
+          </h2>
+
+          <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-slate-500 dark:text-slate-400">
+            Are you sure you want to permanently
+            delete this file? This action cannot
+            be undone.
+          </p>
+
+          <div className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
+              {getFileIcon(file, 21)}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p
+                className="truncate text-sm font-semibold text-slate-900 dark:text-white"
+                title={file.fileName}
+              >
+                {file.fileName}
+              </p>
+
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {formatFileSize(file.fileSize)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900/50">
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={onCancel}
+            className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={onConfirm}
+            className="inline-flex min-w-[105px] items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deleting ? (
+              <>
+                <Loader2
+                  size={17}
+                  className="animate-spin"
+                />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <Trash2 size={17} />
+                Delete
+              </>
+            )}
+          </button>
         </div>
       </div>
     </div>
