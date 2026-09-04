@@ -340,9 +340,9 @@ export default function DashboardShell({
       icon: FolderOpen,
     },
     {
-    name: "My Files",
-    href: "/files",
-    icon: FolderOpen,
+    name: "Starred",
+    href: "/starred",
+    icon: Star,
   },
     {
       name: "Shared Files",
