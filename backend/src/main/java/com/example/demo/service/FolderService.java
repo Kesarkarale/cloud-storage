@@ -134,46 +134,7 @@ public class FolderService {
         deleteFolderRecursively(folderId, userId);
     }
 
-    private void deleteFolderRecursively(
-            UUID folderId,
-            UUID userId
-    ) {
-
-        List<Folder> children =
-                folderRepository
-                        .findByUserIdAndParentFolderId(
-                                userId,
-                                folderId
-                        );
-
-        for (Folder child : children) {
-            deleteFolderRecursively(
-                    child.getId(),
-                    userId
-            );
-        }
-
-        List<com.example.demo.model.File> files =
-                fileRepository
-                        .findByUserIdAndParentFolderId(
-                                userId,
-                                folderId
-                        );
-
-        for (com.example.demo.model.File file : files) {
-
-            try {
-                java.nio.file.Files.deleteIfExists(
-                        java.nio.file.Paths.get(
-                                file.getFilePath()
-                        )
-                );
-            } catch (Exception ignored) {
-            }
-
-            fileRepository.delete(file);
-        }
-
-        folderRepository.deleteById(folderId);
-    }
-}
+ private void deleteFolderRecursively(
+        UUID folderId,
+        UUID userId
+)
