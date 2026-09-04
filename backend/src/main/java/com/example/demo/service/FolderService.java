@@ -138,3 +138,90 @@ public class FolderService {
         UUID folderId,
         UUID userId
 )
+
+    // =========================
+// GET TRASH FOLDERS
+// =========================
+
+public List<Folder> getTrashFolders(UUID userId) {
+
+    return folderRepository.findByUserIdAndDeletedTrue(userId);
+}
+
+
+// =========================
+// RESTORE FOLDER
+// =========================
+
+public void restoreFolder(
+        UUID folderId,
+        UUID userId
+) {
+
+    Folder folder =
+            folderRepository
+                    .findByIdAndUserIdAndDeletedTrue(
+                            folderId,
+                            userId
+                    )
+                    .orElseThrow(() ->
+                            new RuntimeException(
+                                    "Trashed folder not found"
+                            )
+                    );
+
+    folder.setDeleted(false);
+    folder.setDeletedAt(null);
+
+    folderRepository.save(folder);
+}
+
+
+// =========================
+// PERMANENT DELETE FOLDER
+// =========================
+
+public void permanentlyDeleteFolder(
+        UUID folderId,
+        UUID userId
+) {
+
+    Folder folder =
+            folderRepository
+                    .findByIdAndUserIdAndDeletedTrue(
+                            folderId,
+                            userId
+                    )
+                    .orElseThrow(() ->
+                            new RuntimeException(
+                                    "Trashed folder not found"
+                            )
+                    );
+
+    // Delete all files inside folder
+    List<com.example.demo.model.File> files =
+            fileRepository
+                    .findByUserIdAndParentFolderId(
+                            userId,
+                            folderId
+                    );
+
+    for (com.example.demo.model.File file : files) {
+
+        try {
+
+            java.nio.file.Files.deleteIfExists(
+                    java.nio.file.Paths.get(
+                            file.getFilePath()
+                    )
+            );
+
+        } catch (Exception ignored) {
+        }
+
+        fileRepository.delete(file);
+    }
+
+    // Delete folder from database
+    folderRepository.delete(folder);
+}
