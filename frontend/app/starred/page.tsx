@@ -1,19 +1,16 @@
 "use client";
 
 import {
-  Archive,
   ArrowDownAZ,
   ArrowUpAZ,
-  ChevronDown,
   Download,
-  File,
+  File as FileIcon,
   FileArchive,
   FileAudio,
   FileCode2,
   FileImage,
   FileSpreadsheet,
   FileText,
-  Folder,
   Grid2X2,
   List,
   Loader2,
@@ -26,571 +23,463 @@ import {
 } from "lucide-react";
 
 import {
+  ChangeEvent,
   useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
 
-type StarredFile = {
-  id: string;
-  fileName: string;
-  fileType: string;
-  fileSize: number;
-  filePath?: string;
-  parentFolderId?: string | null;
-  createdAt: string;
-  deleted?: boolean;
-  starred: boolean;
-};
+type ViewMode = "grid" | "list";
+type SortDirection = "asc" | "desc";
 
-type StarredFolder = {
+interface StarredFile {
   id: string;
-  name: string;
-  userId: string;
-  parentFolderId?: string | null;
-  createdAt: string;
-  deleted?: boolean;
-  starred: boolean;
-};
+  name?: string;
+  fileName?: string;
+  originalFileName?: string;
+  filename?: string;
 
-type ItemType = "file" | "folder";
-
-type StarredItem = {
-  id: string;
-  name: string;
-  type: ItemType;
-  fileType?: string;
+  size?: number;
   fileSize?: number;
-  createdAt: string;
-  starred: boolean;
-  original: StarredFile | StarredFolder;
-};
 
-type SortOption =
-  | "name-asc"
-  | "name-desc"
-  | "date-desc"
-  | "date-asc"
-  | "size-desc"
-  | "size-asc";
+  contentType?: string;
+  mimeType?: string;
+  type?: string;
+
+  url?: string;
+  fileUrl?: string;
+  downloadUrl?: string;
+
+  createdAt?: string;
+  updatedAt?: string;
+
+  starred?: boolean;
+}
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:8080";
 
-export default function StarredPage() {
-  const [files, setFiles] = useState<StarredFile[]>([]);
-  const [folders, setFolders] = useState<StarredFolder[]>([]);
+/* =========================================================
+   AUTH TOKEN
+========================================================= */
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
 
-  const [error, setError] = useState("");
+  const possibleKeys = [
+    "token",
+    "accessToken",
+    "jwt",
+    "authToken",
+    "cloudstorage_token",
+    "cloud-storage-token",
+  ];
 
-  const [search, setSearch] = useState("");
+  for (const key of possibleKeys) {
+    const value = localStorage.getItem(key);
 
-  const [viewMode, setViewMode] =
-    useState<"grid" | "list">("grid");
+    if (value) {
+      return value;
+    }
+  }
 
-  const [sortBy, setSortBy] =
-    useState<SortOption>("name-asc");
+  return null;
+}
 
-  const [sortOpen, setSortOpen] =
-    useState(false);
+/* =========================================================
+   AUTH HEADERS
+========================================================= */
 
-  const [activeMenu, setActiveMenu] =
-    useState<string | null>(null);
+function getAuthHeaders(): HeadersInit {
+  const token = getAuthToken();
 
-  const [unstarLoading, setUnstarLoading] =
-    useState<string | null>(null);
+  return {
+    Authorization: token
+      ? token.startsWith("Bearer ")
+        ? token
+        : `Bearer ${token}`
+      : "",
+    "Content-Type": "application/json",
+  };
+}
 
-  // =========================
-  // AUTH HEADERS
-  // =========================
+/* =========================================================
+   FILE NAME
+========================================================= */
 
-  const getHeaders = useCallback(() => {
-    const token =
-      typeof window !== "undefined"
-        ? localStorage.getItem("token")
-        : null;
-
-    return {
-      "Content-Type": "application/json",
-      ...(token
-        ? {
-            Authorization: `Bearer ${token}`,
-          }
-        : {}),
-    };
-  }, []);
-
-  // =========================
-  // FETCH STARRED
-  // =========================
-
-  const fetchStarred = useCallback(
-    async (showRefresh = false) => {
-      try {
-        if (showRefresh) {
-          setRefreshing(true);
-        } else {
-          setLoading(true);
-        }
-
-        setError("");
-
-        const headers = getHeaders();
-
-        const [filesResponse, foldersResponse] =
-          await Promise.all([
-            fetch(
-              `${API_BASE}/api/files/starred`,
-              {
-                method: "GET",
-                headers,
-                credentials: "include",
-              }
-            ),
-
-            fetch(
-              `${API_BASE}/api/folders/starred`,
-              {
-                method: "GET",
-                headers,
-                credentials: "include",
-              }
-            ),
-          ]);
-
-        if (!filesResponse.ok) {
-          throw new Error(
-            "Failed to load starred files"
-          );
-        }
-
-        if (!foldersResponse.ok) {
-          throw new Error(
-            "Failed to load starred folders"
-          );
-        }
-
-        const filesData =
-          await filesResponse.json();
-
-        const foldersData =
-          await foldersResponse.json();
-
-        setFiles(
-          Array.isArray(filesData)
-            ? filesData
-            : []
-        );
-
-        setFolders(
-          Array.isArray(foldersData)
-            ? foldersData
-            : []
-        );
-      } catch (err) {
-        console.error(
-          "Starred loading error:",
-          err
-        );
-
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Unable to load starred items"
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [getHeaders]
+function getFileName(file: StarredFile): string {
+  return (
+    file.name ||
+    file.fileName ||
+    file.originalFileName ||
+    file.filename ||
+    "Untitled file"
   );
+}
 
-  useEffect(() => {
-    fetchStarred();
-  }, [fetchStarred]);
+/* =========================================================
+   MIME TYPE
+========================================================= */
 
-  // =========================
-  // COMBINED ITEMS
-  // =========================
+function getMimeType(file: StarredFile): string {
+  return (
+    file.contentType ||
+    file.mimeType ||
+    file.type ||
+    ""
+  ).toLowerCase();
+}
 
-  const items = useMemo<StarredItem[]>(() => {
-    const fileItems: StarredItem[] =
-      files.map((file) => ({
-        id: file.id,
-        name: file.fileName,
-        type: "file",
-        fileType: file.fileType,
-        fileSize: file.fileSize,
-        createdAt: file.createdAt,
-        starred: file.starred,
-        original: file,
-      }));
+/* =========================================================
+   FILE EXTENSION
+========================================================= */
 
-    const folderItems: StarredItem[] =
-      folders.map((folder) => ({
-        id: folder.id,
-        name: folder.name,
-        type: "folder",
-        createdAt: folder.createdAt,
-        starred: folder.starred,
-        original: folder,
-      }));
+function getExtension(file: StarredFile): string {
+  const name = getFileName(file);
 
-    return [
-      ...folderItems,
-      ...fileItems,
-    ];
-  }, [files, folders]);
+  const lastDot = name.lastIndexOf(".");
 
-  // =========================
-  // FILTER + SORT
-  // =========================
+  if (lastDot === -1) {
+    return "";
+  }
 
-  const filteredItems = useMemo(() => {
-    const query =
-      search.trim().toLowerCase();
+  return name
+    .substring(lastDot + 1)
+    .toLowerCase();
+}
 
-    let result = items.filter((item) =>
-      item.name
-        .toLowerCase()
-        .includes(query)
-    );
+/* =========================================================
+   FILE TYPE
+========================================================= */
 
-    result.sort((a, b) => {
-      switch (sortBy) {
-        case "name-asc":
-          return a.name.localeCompare(
-            b.name
-          );
+function getFileCategory(
+  file: StarredFile
+):
+  | "image"
+  | "pdf"
+  | "document"
+  | "spreadsheet"
+  | "archive"
+  | "audio"
+  | "code"
+  | "other" {
+  const mime = getMimeType(file);
+  const extension = getExtension(file);
 
-        case "name-desc":
-          return b.name.localeCompare(
-            a.name
-          );
+  if (mime.startsWith("image/")) {
+    return "image";
+  }
 
-        case "date-desc":
-          return (
-            new Date(b.createdAt).getTime() -
-            new Date(a.createdAt).getTime()
-          );
+  if (
+    mime.includes("pdf") ||
+    extension === "pdf"
+  ) {
+    return "pdf";
+  }
 
-        case "date-asc":
-          return (
-            new Date(a.createdAt).getTime() -
-            new Date(b.createdAt).getTime()
-          );
+  if (
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    [
+      "xls",
+      "xlsx",
+      "csv",
+      "ods",
+    ].includes(extension)
+  ) {
+    return "spreadsheet";
+  }
 
-        case "size-desc":
-          return (
-            (b.fileSize || 0) -
-            (a.fileSize || 0)
-          );
+  if (
+    mime.includes("word") ||
+    mime.includes("document") ||
+    [
+      "doc",
+      "docx",
+      "txt",
+      "rtf",
+    ].includes(extension)
+  ) {
+    return "document";
+  }
 
-        case "size-asc":
-          return (
-            (a.fileSize || 0) -
-            (b.fileSize || 0)
-          );
+  if (
+    mime.includes("zip") ||
+    mime.includes("rar") ||
+    mime.includes("7z") ||
+    [
+      "zip",
+      "rar",
+      "7z",
+      "tar",
+      "gz",
+    ].includes(extension)
+  ) {
+    return "archive";
+  }
 
-        default:
-          return 0;
-      }
-    });
+  if (
+    mime.startsWith("audio/") ||
+    [
+      "mp3",
+      "wav",
+      "ogg",
+      "m4a",
+      "aac",
+    ].includes(extension)
+  ) {
+    return "audio";
+  }
 
-    return result;
-  }, [items, search, sortBy]);
+  if (
+    mime.includes("javascript") ||
+    mime.includes("typescript") ||
+    mime.includes("json") ||
+    mime.includes("html") ||
+    mime.includes("css") ||
+    [
+      "js",
+      "jsx",
+      "ts",
+      "tsx",
+      "json",
+      "html",
+      "css",
+      "java",
+      "py",
+      "cpp",
+      "c",
+    ].includes(extension)
+  ) {
+    return "code";
+  }
 
-  // =========================
-  // COUNTS
-  // =========================
+  return "other";
+}
 
-  const totalCount =
-    files.length + folders.length;
+/* =========================================================
+   FORMAT FILE SIZE
+========================================================= */
 
-  // =========================
-  // FORMAT SIZE
-  // =========================
+function formatFileSize(
+  bytes?: number
+): string {
+  const size = bytes ?? 0;
 
-  const formatSize = (
-    bytes?: number
-  ) => {
-    if (!bytes || bytes <= 0) {
-      return "—";
-    }
+  if (!size || size < 1) {
+    return "0 KB";
+  }
 
-    const units = [
-      "B",
-      "KB",
-      "MB",
-      "GB",
-      "TB",
-    ];
+  if (size < 1024) {
+    return `${size} B`;
+  }
 
-    const index = Math.floor(
-      Math.log(bytes) /
-        Math.log(1024)
-    );
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
 
-    const safeIndex = Math.min(
-      index,
-      units.length - 1
-    );
-
+  if (size < 1024 * 1024 * 1024) {
     return `${(
-      bytes /
-      Math.pow(1024, safeIndex)
-    ).toFixed(
-      safeIndex === 0 ? 0 : 1
-    )} ${units[safeIndex]}`;
-  };
+      size /
+      (1024 * 1024)
+    ).toFixed(1)} MB`;
+  }
 
-  // =========================
-  // FORMAT DATE
-  // =========================
+  return `${(
+    size /
+    (1024 * 1024 * 1024)
+  ).toFixed(1)} GB`;
+}
 
-  const formatDate = (
-    date: string
-  ) => {
-    if (!date) {
-      return "—";
+/* =========================================================
+   GET SIZE
+========================================================= */
+
+function getFileSize(
+  file: StarredFile
+): number {
+  return Number(
+    file.size ??
+      file.fileSize ??
+      0
+  );
+}
+
+/* =========================================================
+   FORMAT DATE
+========================================================= */
+
+function formatDate(
+  date?: string
+): string {
+  if (!date) {
+    return "Unknown date";
+  }
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "Unknown date";
+  }
+
+  return parsed.toLocaleDateString(
+    undefined,
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
     }
+  );
+}
 
-    const parsed =
-      new Date(date);
+/* =========================================================
+   FILE ICON
+========================================================= */
 
-    if (
-      Number.isNaN(
-        parsed.getTime()
-      )
-    ) {
-      return "—";
-    }
+function FileTypeIcon({
+  file,
+  className = "h-6 w-6",
+}: {
+  file: StarredFile;
+  className?: string;
+}) {
+  const category =
+    getFileCategory(file);
 
-    return parsed.toLocaleDateString(
-      undefined,
-      {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }
-    );
-  };
-
-  // =========================
-  // FILE ICON
-  // =========================
-
-  const getFileIcon = (
-    fileType?: string,
-    size = 34
-  ) => {
-    const type =
-      (fileType || "").toLowerCase();
-
-    if (
-      type.includes("image") ||
-      type.includes("png") ||
-      type.includes("jpg") ||
-      type.includes("jpeg") ||
-      type.includes("gif") ||
-      type.includes("webp")
-    ) {
-      return (
-        <FileImage
-          size={size}
-          strokeWidth={1.8}
-        />
-      );
-    }
-
-    if (
-      type.includes("pdf")
-    ) {
-      return (
-        <FileText
-          size={size}
-          strokeWidth={1.8}
-        />
-      );
-    }
-
-    if (
-      type.includes("word") ||
-      type.includes("document") ||
-      type.includes("msword")
-    ) {
-      return (
-        <FileText
-          size={size}
-          strokeWidth={1.8}
-        />
-      );
-    }
-
-    if (
-      type.includes("sheet") ||
-      type.includes("excel") ||
-      type.includes("csv")
-    ) {
-      return (
-        <FileSpreadsheet
-          size={size}
-          strokeWidth={1.8}
-        />
-      );
-    }
-
-    if (
-      type.includes("zip") ||
-      type.includes("rar") ||
-      type.includes("7z") ||
-      type.includes("archive")
-    ) {
-      return (
-        <FileArchive
-          size={size}
-          strokeWidth={1.8}
-        />
-      );
-    }
-
-    if (
-      type.includes("audio") ||
-      type.includes("mp3") ||
-      type.includes("wav")
-    ) {
-      return (
-        <FileAudio
-          size={size}
-          strokeWidth={1.8}
-        />
-      );
-    }
-
-    if (
-      type.includes("javascript") ||
-      type.includes("typescript") ||
-      type.includes("json") ||
-      type.includes("html") ||
-      type.includes("css") ||
-      type.includes("code")
-    ) {
-      return (
-        <FileCode2
-          size={size}
-          strokeWidth={1.8}
-        />
-      );
-    }
-
+  if (category === "image") {
     return (
-      <File
-        size={size}
-        strokeWidth={1.8}
+      <FileImage
+        className={className}
       />
     );
-  };
+  }
 
-  // =========================
-  // UNSTAR
-  // =========================
+  if (category === "spreadsheet") {
+    return (
+      <FileSpreadsheet
+        className={className}
+      />
+    );
+  }
 
-  const handleUnstar = async (
-    item: StarredItem
-  ) => {
+  if (category === "archive") {
+    return (
+      <FileArchive
+        className={className}
+      />
+    );
+  }
+
+  if (category === "audio") {
+    return (
+      <FileAudio
+        className={className}
+      />
+    );
+  }
+
+  if (category === "code") {
+    return (
+      <FileCode2
+        className={className}
+      />
+    );
+  }
+
+  if (
+    category === "document" ||
+    category === "pdf"
+  ) {
+    return (
+      <FileText
+        className={className}
+      />
+    );
+  }
+
+  return (
+    <FileIcon
+      className={className}
+    />
+  );
+}
+
+/* =========================================================
+   FILE ICON BACKGROUND
+========================================================= */
+
+function getIconClasses(
+  file: StarredFile
+): string {
+  const category =
+    getFileCategory(file);
+
+  if (category === "image") {
+    return "bg-purple-100 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400";
+  }
+
+  if (category === "pdf") {
+    return "bg-red-100 text-red-600 dark:bg-red-500/10 dark:text-red-400";
+  }
+
+  if (category === "spreadsheet") {
+    return "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400";
+  }
+
+  if (category === "archive") {
+    return "bg-amber-100 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400";
+  }
+
+  if (category === "audio") {
+    return "bg-pink-100 text-pink-600 dark:bg-pink-500/10 dark:text-pink-400";
+  }
+
+  if (category === "code") {
+    return "bg-cyan-100 text-cyan-600 dark:bg-cyan-500/10 dark:text-cyan-400";
+  }
+
+  return "bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400";
+}
+
+/* =========================================================
+   DOWNLOAD FILE
+========================================================= */
+
+async function downloadFile(
+  file: StarredFile
+) {
+  const directUrl =
+    file.downloadUrl ||
+    file.fileUrl ||
+    file.url;
+
+  if (directUrl) {
     try {
-      setUnstarLoading(item.id);
-      setActiveMenu(null);
-
-      const endpoint =
-        item.type === "file"
-          ? `${API_BASE}/api/files/${item.id}/star`
-          : `${API_BASE}/api/folders/${item.id}/star`;
-
-      const response =
-        await fetch(endpoint, {
-          method: "DELETE",
-          headers: getHeaders(),
-          credentials: "include",
-        });
+      const response = await fetch(
+        directUrl,
+        {
+          headers: {
+            Authorization:
+              getAuthHeaders()
+                .Authorization || "",
+          },
+        }
+      );
 
       if (!response.ok) {
         throw new Error(
-          "Failed to remove star"
-        );
-      }
-
-      if (item.type === "file") {
-        setFiles((prev) =>
-          prev.filter(
-            (file) =>
-              file.id !== item.id
-          )
-        );
-      } else {
-        setFolders((prev) =>
-          prev.filter(
-            (folder) =>
-              folder.id !== item.id
-          )
-        );
-      }
-    } catch (err) {
-      console.error(
-        "Unstar error:",
-        err
-      );
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to remove star"
-      );
-    } finally {
-      setUnstarLoading(null);
-    }
-  };
-
-  // =========================
-  // DOWNLOAD
-  // =========================
-
-  const handleDownload = async (
-    item: StarredItem
-  ) => {
-    if (item.type !== "file") {
-      return;
-    }
-
-    try {
-      setActiveMenu(null);
-
-      const response =
-        await fetch(
-          `${API_BASE}/api/files/${item.id}/download`,
-          {
-            method: "GET",
-            headers: getHeaders(),
-            credentials: "include",
-          }
-        );
-
-      if (!response.ok) {
-        throw new Error(
-          "Unable to download file"
+          "Download failed"
         );
       }
 
       const blob =
         await response.blob();
 
-      const url =
+      const objectUrl =
         window.URL.createObjectURL(
           blob
         );
@@ -598,9 +487,9 @@ export default function StarredPage() {
       const anchor =
         document.createElement("a");
 
-      anchor.href = url;
+      anchor.href = objectUrl;
       anchor.download =
-        item.name;
+        getFileName(file);
 
       document.body.appendChild(
         anchor
@@ -611,40 +500,297 @@ export default function StarredPage() {
       anchor.remove();
 
       window.URL.revokeObjectURL(
-        url
-      );
-    } catch (err) {
-      console.error(
-        "Download error:",
-        err
+        objectUrl
       );
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to download file"
+      return;
+    } catch {
+      window.open(
+        directUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+
+      return;
+    }
+  }
+
+  /*
+    If your backend later provides a dedicated
+    download endpoint, this fallback can be
+    adjusted according to that endpoint.
+  */
+
+  const endpoint =
+    `${API_BASE}/api/files/${file.id}/download`;
+
+  try {
+    const response = await fetch(
+      endpoint,
+      {
+        method: "GET",
+        headers: getAuthHeaders(),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        "Download failed"
       );
     }
-  };
 
-  // =========================
-  // OPEN FOLDER
-  // =========================
+    const blob =
+      await response.blob();
 
-  const handleOpenFolder = (
-    folder: StarredFolder
-  ) => {
-    window.location.href =
-      `/files?folderId=${folder.id}`;
-  };
+    const objectUrl =
+      window.URL.createObjectURL(
+        blob
+      );
 
-  // =========================
-  // CLOSE MENU
-  // =========================
+    const anchor =
+      document.createElement("a");
+
+    anchor.href = objectUrl;
+    anchor.download =
+      getFileName(file);
+
+    document.body.appendChild(
+      anchor
+    );
+
+    anchor.click();
+
+    anchor.remove();
+
+    window.URL.revokeObjectURL(
+      objectUrl
+    );
+  } catch (error) {
+    console.error(
+      "Download error:",
+      error
+    );
+
+    alert(
+      "Unable to download this file."
+    );
+  }
+}
+
+/* =========================================================
+   SKELETON CARD
+========================================================= */
+
+function SkeletonCard() {
+  return (
+    <div className="animate-pulse rounded-2xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.03]">
+      <div className="mb-5 flex items-center justify-between">
+        <div className="h-12 w-12 rounded-xl bg-slate-200 dark:bg-white/10" />
+        <div className="h-8 w-8 rounded-lg bg-slate-200 dark:bg-white/10" />
+      </div>
+
+      <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-white/10" />
+
+      <div className="mt-3 h-3 w-1/2 rounded bg-slate-100 dark:bg-white/5" />
+
+      <div className="mt-6 h-3 w-full rounded bg-slate-100 dark:bg-white/5" />
+    </div>
+  );
+}
+
+/* =========================================================
+   PAGE
+========================================================= */
+
+export default function StarredPage() {
+  const [files, setFiles] =
+    useState<StarredFile[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [refreshing, setRefreshing] =
+    useState(false);
+
+  const [searchQuery, setSearchQuery] =
+    useState("");
+
+  const [viewMode, setViewMode] =
+    useState<ViewMode>("grid");
+
+  const [sortDirection, setSortDirection] =
+    useState<SortDirection>("desc");
+
+  const [activeMenu, setActiveMenu] =
+    useState<string | null>(null);
+
+  const [removingId, setRemovingId] =
+    useState<string | null>(null);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  /* =======================================================
+     FETCH STARRED FILES
+  ======================================================= */
+
+  const fetchStarredFiles =
+    useCallback(
+      async (
+        showRefreshLoader = false
+      ) => {
+        try {
+          if (showRefreshLoader) {
+            setRefreshing(true);
+          } else {
+            setLoading(true);
+          }
+
+          setError(null);
+
+          const token =
+            getAuthToken();
+
+          if (!token) {
+            setFiles([]);
+
+            setError(
+              "Please log in to view your starred files."
+            );
+
+            return;
+          }
+
+          const response =
+            await fetch(
+              `${API_BASE}/api/files/starred`,
+              {
+                method: "GET",
+                headers:
+                  getAuthHeaders(),
+                cache: "no-store",
+              }
+            );
+
+          if (!response.ok) {
+            let message =
+              "Failed to load starred files.";
+
+            try {
+              const data =
+                await response.json();
+
+              if (
+                data?.message
+              ) {
+                message =
+                  data.message;
+              }
+            } catch {
+              // Ignore JSON parsing error.
+            }
+
+            throw new Error(
+              message
+            );
+          }
+
+          const data =
+            await response.json();
+
+          let starredFiles: StarredFile[] =
+            [];
+
+          /*
+            Supports:
+            [
+              ...
+            ]
+
+            OR
+
+            {
+              data: [...]
+            }
+
+            OR
+
+            {
+              files: [...]
+            }
+
+            OR
+
+            {
+              content: [...]
+            }
+          */
+
+          if (Array.isArray(data)) {
+            starredFiles = data;
+          } else if (
+            Array.isArray(data?.data)
+          ) {
+            starredFiles =
+              data.data;
+          } else if (
+            Array.isArray(data?.files)
+          ) {
+            starredFiles =
+              data.files;
+          } else if (
+            Array.isArray(
+              data?.content
+            )
+          ) {
+            starredFiles =
+              data.content;
+          }
+
+          setFiles(
+            starredFiles.filter(
+              (file) =>
+                file &&
+                file.id
+            )
+          );
+        } catch (err) {
+          console.error(
+            "Failed to load starred files:",
+            err
+          );
+
+          setFiles([]);
+
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load starred files."
+          );
+        } finally {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      },
+      []
+    );
+
+  /* =======================================================
+     INITIAL LOAD
+  ======================================================= */
 
   useEffect(() => {
-    const handleClick =
-      () => setActiveMenu(null);
+    fetchStarredFiles();
+  }, [fetchStarredFiles]);
+
+  /* =======================================================
+     CLOSE MENU WHEN CLICKING OUTSIDE
+  ======================================================= */
+
+  useEffect(() => {
+    function handleClick() {
+      setActiveMenu(null);
+    }
 
     if (activeMenu) {
       document.addEventListener(
@@ -661,1495 +807,822 @@ export default function StarredPage() {
     };
   }, [activeMenu]);
 
-  // =========================
-  // SORT LABEL
-  // =========================
+  /* =======================================================
+     FILTER + SORT
+  ======================================================= */
 
-  const sortLabel = () => {
-    switch (sortBy) {
-      case "name-asc":
-        return "Name A–Z";
+  const filteredFiles =
+    useMemo(() => {
+      const query =
+        searchQuery
+          .trim()
+          .toLowerCase();
 
-      case "name-desc":
-        return "Name Z–A";
+      let result =
+        files.filter((file) => {
+          if (!query) {
+            return true;
+          }
 
-      case "date-desc":
-        return "Newest first";
+          return getFileName(
+            file
+          )
+            .toLowerCase()
+            .includes(query);
+        });
 
-      case "date-asc":
-        return "Oldest first";
+      result.sort((a, b) => {
+        const dateA =
+          new Date(
+            a.updatedAt ||
+              a.createdAt ||
+              0
+          ).getTime();
 
-      case "size-desc":
-        return "Largest first";
+        const dateB =
+          new Date(
+            b.updatedAt ||
+              b.createdAt ||
+              0
+          ).getTime();
 
-      case "size-asc":
-        return "Smallest first";
+        return sortDirection ===
+          "desc"
+          ? dateB - dateA
+          : dateA - dateB;
+      });
 
-      default:
-        return "Name A–Z";
+      return result;
+    }, [
+      files,
+      searchQuery,
+      sortDirection,
+    ]);
+
+  /* =======================================================
+     UNSTAR FILE
+  ======================================================= */
+
+  async function handleUnstar(
+    file: StarredFile
+  ) {
+    if (removingId) {
+      return;
     }
-  };
 
-  return (
-    <div
-      className="
-        min-h-screen
-        bg-[#f8fafc]
-        dark:bg-[#0b1120]
-        text-slate-900
-        dark:text-white
-        px-4
-        py-5
-        sm:px-6
-        lg:px-8
-      "
-    >
-      {/* =========================
-          HEADER
-      ========================= */}
+    try {
+      setRemovingId(file.id);
+      setActiveMenu(null);
 
-      <div className="mx-auto max-w-7xl">
+      const response =
+        await fetch(
+          `${API_BASE}/api/files/${file.id}/star`,
+          {
+            method: "DELETE",
+            headers:
+              getAuthHeaders(),
+          }
+        );
 
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+      if (!response.ok) {
+        let message =
+          "Unable to remove star.";
 
-          <div>
+        try {
+          const data =
+            await response.json();
+
+          if (
+            data?.message
+          ) {
+            message =
+              data.message;
+          }
+        } catch {
+          // Ignore.
+        }
+
+        throw new Error(
+          message
+        );
+      }
+
+      setFiles((current) =>
+        current.filter(
+          (item) =>
+            item.id !== file.id
+        )
+      );
+    } catch (error) {
+      console.error(
+        "Unstar error:",
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Unable to remove star."
+      );
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
+  /* =======================================================
+     SEARCH HANDLER
+  ======================================================= */
+
+  function handleSearch(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    setSearchQuery(
+      event.target.value
+    );
+  }
+
+  /* =======================================================
+     CLEAR SEARCH
+  ======================================================= */
+
+  function clearSearch() {
+    setSearchQuery("");
+  }
+
+  /* =======================================================
+     REFRESH
+  ======================================================= */
+
+  function handleRefresh() {
+    fetchStarredFiles(true);
+  }
+
+  /* =======================================================
+     ERROR STATE
+  ======================================================= */
+
+  if (
+    !loading &&
+    error &&
+    files.length === 0
+  ) {
+    return (
+      <div className="min-h-[calc(100vh-5rem)] bg-slate-50 px-4 py-6 transition-colors duration-300 dark:bg-slate-950 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-8">
             <div className="flex items-center gap-3">
-
-              <div
-                className="
-                  flex
-                  h-12
-                  w-12
-                  items-center
-                  justify-center
-                  rounded-2xl
-                  bg-amber-100
-                  text-amber-500
-                  dark:bg-amber-500/15
-                  dark:text-amber-400
-                "
-              >
-                <Star
-                  size={25}
-                  fill="currentColor"
-                  strokeWidth={1.8}
-                />
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-500/10">
+                <Star className="h-5 w-5 fill-amber-500 text-amber-500" />
               </div>
 
               <div>
-                <h1
-                  className="
-                    text-2xl
-                    font-bold
-                    tracking-tight
-                    sm:text-3xl
-                  "
-                >
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-3xl">
                   Starred
                 </h1>
 
-                <p
-                  className="
-                    mt-0.5
-                    text-sm
-                    text-slate-500
-                    dark:text-slate-400
-                  "
-                >
-                  Your favourite files and
-                  folders in one place
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Quickly access your important files.
                 </p>
               </div>
             </div>
-
-            <div
-              className="
-                mt-4
-                flex
-                flex-wrap
-                items-center
-                gap-2
-                text-sm
-                text-slate-500
-                dark:text-slate-400
-              "
-            >
-              <span>
-                {totalCount}{" "}
-                {totalCount === 1
-                  ? "item"
-                  : "items"}
-              </span>
-
-              <span>•</span>
-
-              <span>
-                {files.length}{" "}
-                {files.length === 1
-                  ? "file"
-                  : "files"}
-              </span>
-
-              <span>•</span>
-
-              <span>
-                {folders.length}{" "}
-                {folders.length === 1
-                  ? "folder"
-                  : "folders"}
-              </span>
-            </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              fetchStarred(true)
-            }
-            disabled={refreshing}
-            className="
-              inline-flex
-              h-10
-              items-center
-              justify-center
-              gap-2
-              rounded-xl
-              border
-              border-slate-200
-              bg-white
-              px-4
-              text-sm
-              font-medium
-              text-slate-700
-              shadow-sm
-              transition
-              hover:bg-slate-50
-              disabled:cursor-not-allowed
-              disabled:opacity-60
-              dark:border-slate-800
-              dark:bg-slate-900
-              dark:text-slate-200
-              dark:hover:bg-slate-800
-            "
-          >
-            <RefreshCw
-              size={16}
-              className={
-                refreshing
-                  ? "animate-spin"
-                  : ""
-              }
-            />
-            Refresh
-          </button>
-        </div>
-
-        {/* =========================
-            TOOLBAR
-        ========================= */}
-
-        <div
-          className="
-            mt-7
-            rounded-2xl
-            border
-            border-slate-200
-            bg-white
-            p-3
-            shadow-sm
-            dark:border-slate-800
-            dark:bg-slate-900
-          "
-        >
-          <div
-            className="
-              flex
-              flex-col
-              gap-3
-              md:flex-row
-              md:items-center
-              md:justify-between
-            "
-          >
-
-            {/* SEARCH */}
-
-            <div
-              className="
-                relative
-                w-full
-                md:max-w-md
-              "
-            >
-              <Search
-                size={18}
-                className="
-                  absolute
-                  left-3
-                  top-1/2
-                  -translate-y-1/2
-                  text-slate-400
-                "
-              />
-
-              <input
-                value={search}
-                onChange={(e) =>
-                  setSearch(
-                    e.target.value
-                  )
-                }
-                placeholder="Search starred items..."
-                className="
-                  h-11
-                  w-full
-                  rounded-xl
-                  border
-                  border-slate-200
-                  bg-slate-50
-                  pl-10
-                  pr-10
-                  text-sm
-                  outline-none
-                  transition
-                  placeholder:text-slate-400
-                  focus:border-slate-400
-                  focus:bg-white
-                  dark:border-slate-700
-                  dark:bg-slate-800
-                  dark:focus:border-slate-500
-                  dark:focus:bg-slate-800
-                "
-              />
-
-              {search && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSearch("")
-                  }
-                  className="
-                    absolute
-                    right-3
-                    top-1/2
-                    -translate-y-1/2
-                    text-slate-400
-                    hover:text-slate-700
-                    dark:hover:text-white
-                  "
-                >
-                  <X size={16} />
-                </button>
-              )}
-            </div>
-
-            <div
-              className="
-                flex
-                items-center
-                gap-2
-              "
-            >
-
-              {/* SORT */}
-
-              <div className="relative">
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSortOpen(
-                      (prev) => !prev
-                    );
-                  }}
-                  className="
-                    flex
-                    h-10
-                    items-center
-                    gap-2
-                    rounded-xl
-                    border
-                    border-slate-200
-                    bg-white
-                    px-3
-                    text-sm
-                    font-medium
-                    text-slate-700
-                    hover:bg-slate-50
-                    dark:border-slate-700
-                    dark:bg-slate-800
-                    dark:text-slate-200
-                    dark:hover:bg-slate-700
-                  "
-                >
-                  <ArrowDownAZ
-                    size={16}
-                  />
-
-                  <span className="hidden sm:inline">
-                    {sortLabel()}
-                  </span>
-
-                  <ChevronDown
-                    size={15}
-                  />
-                </button>
-
-                {sortOpen && (
-                  <div
-                    className="
-                      absolute
-                      right-0
-                      z-30
-                      mt-2
-                      w-48
-                      overflow-hidden
-                      rounded-xl
-                      border
-                      border-slate-200
-                      bg-white
-                      p-1
-                      shadow-xl
-                      dark:border-slate-700
-                      dark:bg-slate-900
-                    "
-                    onClick={(e) =>
-                      e.stopPropagation()
-                    }
-                  >
-                    {[
-                      [
-                        "name-asc",
-                        "Name A–Z",
-                      ],
-                      [
-                        "name-desc",
-                        "Name Z–A",
-                      ],
-                      [
-                        "date-desc",
-                        "Newest first",
-                      ],
-                      [
-                        "date-asc",
-                        "Oldest first",
-                      ],
-                      [
-                        "size-desc",
-                        "Largest first",
-                      ],
-                      [
-                        "size-asc",
-                        "Smallest first",
-                      ],
-                    ].map(
-                      ([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => {
-                            setSortBy(
-                              value as SortOption
-                            );
-                            setSortOpen(
-                              false
-                            );
-                          }}
-                          className={`
-                            flex
-                            w-full
-                            items-center
-                            justify-between
-                            rounded-lg
-                            px-3
-                            py-2.5
-                            text-left
-                            text-sm
-                            ${
-                              sortBy ===
-                              value
-                                ? "bg-slate-100 font-semibold text-slate-900 dark:bg-slate-800 dark:text-white"
-                                : "text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
-                            }
-                          `}
-                        >
-                          <span>
-                            {label}
-                          </span>
-
-                          {sortBy ===
-                            value && (
-                            <span>
-                              ✓
-                            </span>
-                          )}
-                        </button>
-                      )
-                    )}
-                  </div>
-                )}
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-6 dark:border-red-500/20 dark:bg-red-500/5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 dark:bg-red-500/10">
+                <X className="h-5 w-5 text-red-600 dark:text-red-400" />
               </div>
 
-              {/* VIEW */}
+              <div className="flex-1">
+                <h2 className="font-semibold text-red-800 dark:text-red-300">
+                  Unable to load starred files
+                </h2>
 
-              <div
-                className="
-                  flex
-                  h-10
-                  items-center
-                  rounded-xl
-                  border
-                  border-slate-200
-                  bg-slate-50
-                  p-1
-                  dark:border-slate-700
-                  dark:bg-slate-800
-                "
-              >
-                <button
-                  type="button"
-                  onClick={() =>
-                    setViewMode("grid")
-                  }
-                  className={`
-                    flex
-                    h-8
-                    w-8
-                    items-center
-                    justify-center
-                    rounded-lg
-                    transition
-                    ${
-                      viewMode ===
-                      "grid"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white"
-                        : "text-slate-400"
-                    }
-                  `}
-                >
-                  <Grid2X2
-                    size={17}
-                  />
-                </button>
+                <p className="mt-1 text-sm text-red-700 dark:text-red-400">
+                  {error}
+                </p>
 
                 <button
                   type="button"
                   onClick={() =>
-                    setViewMode("list")
+                    fetchStarredFiles()
                   }
-                  className={`
-                    flex
-                    h-8
-                    w-8
-                    items-center
-                    justify-center
-                    rounded-lg
-                    transition
-                    ${
-                      viewMode ===
-                      "list"
-                        ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white"
-                        : "text-slate-400"
-                    }
-                  `}
+                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
                 >
-                  <List
-                    size={18}
-                  />
+                  <RefreshCw className="h-4 w-4" />
+                  Try again
                 </button>
               </div>
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
 
-        {/* =========================
-            ERROR
-        ========================= */}
+  /* =======================================================
+     MAIN UI
+  ======================================================= */
 
-        {error && (
-          <div
-            className="
-              mt-4
-              flex
-              items-center
-              justify-between
-              gap-3
-              rounded-xl
-              border
-              border-red-200
-              bg-red-50
-              px-4
-              py-3
-              text-sm
-              text-red-700
-              dark:border-red-900/50
-              dark:bg-red-950/30
-              dark:text-red-300
-            "
-          >
-            <span>
-              {error}
-            </span>
+  return (
+    <div
+      className="min-h-[calc(100vh-5rem)] bg-slate-50 transition-colors duration-300 dark:bg-slate-950"
+      onClick={() =>
+        setActiveMenu(null)
+      }
+    >
+      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
 
-            <button
-              type="button"
-              onClick={() =>
-                setError("")
-              }
-              className="
-                shrink-0
-                rounded-lg
-                p-1
-                hover:bg-red-100
-                dark:hover:bg-red-900/30
-              "
-            >
-              <X size={16} />
-            </button>
-          </div>
-        )}
+        {/* =================================================
+            PAGE HEADER
+        ================================================= */}
 
-        {/* =========================
-            LOADING
-        ========================= */}
+        <div className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
 
-        {loading ? (
-          <div
-            className="
-              flex
-              min-h-[420px]
-              items-center
-              justify-center
-            "
-          >
-            <div className="text-center">
+          <div className="flex items-center gap-3">
 
-              <div
-                className="
-                  mx-auto
-                  flex
-                  h-14
-                  w-14
-                  items-center
-                  justify-center
-                  rounded-2xl
-                  bg-slate-100
-                  dark:bg-slate-800
-                "
-              >
-                <Loader2
-                  size={25}
-                  className="animate-spin"
-                />
-              </div>
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 shadow-sm dark:bg-amber-500/10">
+              <Star className="h-6 w-6 fill-amber-500 text-amber-500" />
+            </div>
 
-              <p
-                className="
-                  mt-4
-                  text-sm
-                  text-slate-500
-                  dark:text-slate-400
-                "
-              >
-                Loading starred items...
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-3xl">
+                Starred
+              </h1>
+
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Your important files, all in one place.
               </p>
             </div>
           </div>
-        ) : filteredItems.length ===
-          0 ? (
-          /* =========================
-             EMPTY STATE
-          ========================= */
 
-          <div
-            className="
-              mt-6
-              flex
-              min-h-[440px]
-              flex-col
-              items-center
-              justify-center
-              rounded-2xl
-              border
-              border-dashed
-              border-slate-300
-              bg-white
-              px-6
-              text-center
-              dark:border-slate-700
-              dark:bg-slate-900
-            "
-          >
-            <div
-              className="
-                flex
-                h-20
-                w-20
-                items-center
-                justify-center
-                rounded-3xl
-                bg-amber-50
-                text-amber-500
-                dark:bg-amber-500/10
-                dark:text-amber-400
-              "
+          <div className="flex items-center gap-2">
+
+            {/* Refresh */}
+
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleRefresh();
+              }}
+              disabled={refreshing}
+              title="Refresh"
+              className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
             >
-              {search ? (
-                <Search
-                  size={32}
-                />
-              ) : (
-                <Star
-                  size={34}
-                  fill="currentColor"
-                />
-              )}
-            </div>
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  refreshing
+                    ? "animate-spin"
+                    : ""
+                }`}
+              />
 
-            <h2
-              className="
-                mt-6
-                text-lg
-                font-semibold
-              "
-            >
-              {search
-                ? "No matching items"
-                : "Nothing starred yet"}
-            </h2>
+              <span className="hidden sm:block">
+                Refresh
+              </span>
+            </button>
+          </div>
+        </div>
 
-            <p
-              className="
-                mt-2
-                max-w-md
-                text-sm
-                leading-6
-                text-slate-500
-                dark:text-slate-400
-              "
-            >
-              {search
-                ? "Try a different search term to find your starred files or folders."
-                : "Star your important files and folders to access them quickly from this section."}
-            </p>
+        {/* =================================================
+            TOOLBAR
+        ================================================= */}
 
-            {search && (
+        <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-center">
+
+          {/* Search */}
+
+          <div className="relative min-w-0 flex-1">
+
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={handleSearch}
+              onClick={(event) =>
+                event.stopPropagation()
+              }
+              placeholder="Search starred files..."
+              className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
+            />
+
+            {searchQuery && (
               <button
                 type="button"
-                onClick={() =>
-                  setSearch("")
-                }
-                className="
-                  mt-5
-                  rounded-xl
-                  bg-slate-900
-                  px-4
-                  py-2.5
-                  text-sm
-                  font-medium
-                  text-white
-                  transition
-                  hover:bg-slate-700
-                  dark:bg-white
-                  dark:text-slate-900
-                  dark:hover:bg-slate-200
-                "
+                onClick={(event) => {
+                  event.stopPropagation();
+                  clearSearch();
+                }}
+                className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
               >
-                Clear search
+                <X className="h-4 w-4" />
               </button>
+            )}
+          </div>
+
+          {/* Sort */}
+
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+
+              setSortDirection(
+                (current) =>
+                  current ===
+                  "desc"
+                    ? "asc"
+                    : "desc"
+              );
+            }}
+            title="Change sort order"
+            className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+          >
+            {sortDirection ===
+            "desc" ? (
+              <ArrowDownAZ className="h-4 w-4" />
+            ) : (
+              <ArrowUpAZ className="h-4 w-4" />
+            )}
+
+            <span className="hidden sm:block">
+              {sortDirection ===
+              "desc"
+                ? "Newest"
+                : "Oldest"}
+            </span>
+          </button>
+
+          {/* View switch */}
+
+          <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-white/10 dark:bg-white/5">
+
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setViewMode("grid");
+              }}
+              title="Grid view"
+              className={`flex h-8 w-9 items-center justify-center rounded-lg transition ${
+                viewMode === "grid"
+                  ? "bg-white text-blue-600 shadow-sm dark:bg-white/10 dark:text-blue-400"
+                  : "text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              }`}
+            >
+              <Grid2X2 className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setViewMode("list");
+              }}
+              title="List view"
+              className={`flex h-8 w-9 items-center justify-center rounded-lg transition ${
+                viewMode === "list"
+                  ? "bg-white text-blue-600 shadow-sm dark:bg-white/10 dark:text-blue-400"
+                  : "text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              }`}
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* =================================================
+            RESULT COUNT
+        ================================================= */}
+
+        {!loading && (
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-xs font-medium text-slate-400">
+              {searchQuery
+                ? `${filteredFiles.length} ${
+                    filteredFiles.length ===
+                    1
+                      ? "result"
+                      : "results"
+                  }`
+                : `${files.length} ${
+                    files.length === 1
+                      ? "starred file"
+                      : "starred files"
+                  }`}
+            </p>
+          </div>
+        )}
+
+        {/* =================================================
+            LOADING
+        ================================================= */}
+
+        {loading ? (
+          <div
+            className={
+              viewMode === "grid"
+                ? "grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
+                : "space-y-3"
+            }
+          >
+            {Array.from({
+              length: 6,
+            }).map((_, index) => (
+              <SkeletonCard
+                key={index}
+              />
+            ))}
+          </div>
+        ) : filteredFiles.length ===
+          0 ? (
+          /* ===============================================
+             EMPTY STATE
+          =============================================== */
+
+          <div className="flex min-h-[420px] flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white px-6 text-center dark:border-white/10 dark:bg-white/[0.02]">
+
+            <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-amber-100 dark:bg-amber-500/10">
+              <Star className="h-9 w-9 fill-amber-500 text-amber-500" />
+            </div>
+
+            {searchQuery ? (
+              <>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  No matching files
+                </h2>
+
+                <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  We couldn't find any
+                  starred files matching{" "}
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                    "{searchQuery}"
+                  </span>
+                  .
+                </p>
+
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
+                >
+                  Clear search
+                </button>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  No starred files yet
+                </h2>
+
+                <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+                  Star your important files
+                  from My Files and they will
+                  appear here for quick access.
+                </p>
+              </>
             )}
           </div>
         ) : viewMode ===
           "grid" ? (
-          /* =========================
+          /* ===============================================
              GRID VIEW
-          ========================= */
+          =============================================== */
 
-          <div
-            className="
-              mt-6
-              grid
-              grid-cols-1
-              gap-4
-              sm:grid-cols-2
-              lg:grid-cols-3
-              xl:grid-cols-4
-            "
-          >
-            {filteredItems.map(
-              (item) => (
-                <div
-                  key={`${item.type}-${item.id}`}
-                  className="
-                    group
-                    relative
-                    overflow-visible
-                    rounded-2xl
-                    border
-                    border-slate-200
-                    bg-white
-                    p-4
-                    shadow-sm
-                    transition
-                    duration-200
-                    hover:-translate-y-0.5
-                    hover:shadow-md
-                    dark:border-slate-800
-                    dark:bg-slate-900
-                  "
-                >
-                  {/* TOP */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
 
+            {filteredFiles.map(
+              (file) => {
+                const fileName =
+                  getFileName(file);
+
+                const fileSize =
+                  getFileSize(file);
+
+                const isRemoving =
+                  removingId ===
+                  file.id;
+
+                return (
                   <div
-                    className="
-                      flex
-                      items-start
-                      justify-between
-                    "
+                    key={file.id}
+                    onClick={(event) =>
+                      event.stopPropagation()
+                    }
+                    className={`group relative overflow-visible rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 ${
+                      isRemoving
+                        ? "opacity-60"
+                        : ""
+                    }`}
                   >
-                    <div
-                      className={`
-                        flex
-                        h-12
-                        w-12
-                        items-center
-                        justify-center
-                        rounded-xl
-                        ${
-                          item.type ===
-                          "folder"
-                            ? "bg-amber-50 text-amber-500 dark:bg-amber-500/10 dark:text-amber-400"
-                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                        }
-                      `}
-                    >
-                      {item.type ===
-                      "folder" ? (
-                        <Folder
-                          size={27}
-                          fill="currentColor"
-                          strokeWidth={1.5}
-                        />
-                      ) : (
-                        getFileIcon(
-                          item.fileType,
-                          28
-                        )
-                      )}
-                    </div>
 
-                    <div
-                      className="
-                        flex
-                        items-center
-                        gap-1
-                      "
-                    >
+                    {/* Top */}
+
+                    <div className="mb-5 flex items-start justify-between">
+
                       <div
-                        className="
-                          flex
-                          h-8
-                          w-8
-                          items-center
-                          justify-center
-                          rounded-lg
-                          text-amber-500
-                          dark:text-amber-400
-                        "
+                        className={`flex h-12 w-12 items-center justify-center rounded-xl ${getIconClasses(
+                          file
+                        )}`}
                       >
-                        <Star
-                          size={17}
-                          fill="currentColor"
+                        <FileTypeIcon
+                          file={file}
+                          className="h-6 w-6"
                         />
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenu(
-                            activeMenu ===
-                              item.id
-                              ? null
-                              : item.id
-                          );
-                        }}
-                        className="
-                          flex
-                          h-8
-                          w-8
-                          items-center
-                          justify-center
-                          rounded-lg
-                          text-slate-400
-                          opacity-0
-                          transition
-                          hover:bg-slate-100
-                          hover:text-slate-700
-                          group-hover:opacity-100
-                          dark:hover:bg-slate-800
-                          dark:hover:text-white
-                        "
-                      >
-                        <MoreHorizontal
-                          size={18}
-                        />
-                      </button>
+                      <div className="flex items-center gap-1">
+
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-500/10">
+                          <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
+                        </div>
+
+                        <div className="relative">
+
+                          <button
+                            type="button"
+                            onClick={(
+                              event
+                            ) => {
+                              event.stopPropagation();
+
+                              setActiveMenu(
+                                activeMenu ===
+                                  file.id
+                                  ? null
+                                  : file.id
+                              );
+                            }}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
+                            aria-label="File actions"
+                          >
+                            <MoreHorizontal className="h-5 w-5" />
+                          </button>
+
+                          {activeMenu ===
+                            file.id && (
+                            <div
+                              onClick={(
+                                event
+                              ) =>
+                                event.stopPropagation()
+                              }
+                              className="absolute right-0 top-10 z-20 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-slate-900"
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  downloadFile(
+                                    file
+                                  )
+                                }
+                                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white"
+                              >
+                                <Download className="h-4 w-4" />
+                                Download
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={
+                                  isRemoving
+                                }
+                                onClick={() =>
+                                  handleUnstar(
+                                    file
+                                  )
+                                }
+                                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-amber-600 transition hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10"
+                              >
+                                {isRemoving ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Star className="h-4 w-4 fill-current" />
+                                )}
+                                Remove star
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* MENU */}
+                    {/* Name */}
 
-                  {activeMenu ===
-                    item.id && (
-                    <div
-                      className="
-                        absolute
-                        right-4
-                        top-14
-                        z-40
-                        w-44
-                        overflow-hidden
-                        rounded-xl
-                        border
-                        border-slate-200
-                        bg-white
-                        p-1
-                        shadow-xl
-                        dark:border-slate-700
-                        dark:bg-slate-900
-                      "
-                      onClick={(e) =>
-                        e.stopPropagation()
-                      }
-                    >
-                      {item.type ===
-                        "file" && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleDownload(
-                              item
-                            )
-                          }
-                          className="
-                            flex
-                            w-full
-                            items-center
-                            gap-2
-                            rounded-lg
-                            px-3
-                            py-2.5
-                            text-left
-                            text-sm
-                            text-slate-700
-                            hover:bg-slate-50
-                            dark:text-slate-200
-                            dark:hover:bg-slate-800
-                          "
-                        >
-                          <Download
-                            size={16}
-                          />
-                          Download
-                        </button>
-                      )}
+                    <div className="min-w-0">
+                      <h3
+                        title={fileName}
+                        className="truncate text-sm font-semibold text-slate-900 dark:text-white"
+                      >
+                        {fileName}
+                      </h3>
 
-                      {item.type ===
-                        "folder" && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setActiveMenu(
-                              null
-                            );
-                            handleOpenFolder(
-                              item.original as StarredFolder
-                            );
-                          }}
-                          className="
-                            flex
-                            w-full
-                            items-center
-                            gap-2
-                            rounded-lg
-                            px-3
-                            py-2.5
-                            text-left
-                            text-sm
-                            text-slate-700
-                            hover:bg-slate-50
-                            dark:text-slate-200
-                            dark:hover:bg-slate-800
-                          "
-                        >
-                          <Folder
-                            size={16}
-                          />
-                          Open folder
-                        </button>
-                      )}
+                      <p className="mt-1 text-xs text-slate-400">
+                        {formatFileSize(
+                          fileSize
+                        )}
+                      </p>
+                    </div>
+
+                    {/* Bottom */}
+
+                    <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-white/5">
+
+                      <span className="text-[11px] text-slate-400">
+                        {formatDate(
+                          file.updatedAt ||
+                            file.createdAt
+                        )}
+                      </span>
 
                       <button
                         type="button"
                         disabled={
-                          unstarLoading ===
-                          item.id
+                          isRemoving
                         }
                         onClick={() =>
                           handleUnstar(
-                            item
+                            file
                           )
                         }
-                        className="
-                          flex
-                          w-full
-                          items-center
-                          gap-2
-                          rounded-lg
-                          px-3
-                          py-2.5
-                          text-left
-                          text-sm
-                          text-slate-700
-                          hover:bg-slate-50
-                          dark:text-slate-200
-                          dark:hover:bg-slate-800
-                        "
+                        title="Remove star"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-amber-500 transition hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50 dark:hover:bg-amber-500/10"
                       >
-                        {unstarLoading ===
-                        item.id ? (
-                          <Loader2
-                            size={16}
-                            className="animate-spin"
-                          />
+                        {isRemoving ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <Star
-                            size={16}
-                          />
+                          <Star className="h-4 w-4 fill-current" />
                         )}
-
-                        Remove star
                       </button>
                     </div>
-                  )}
-
-                  {/* NAME */}
-
-                  <div className="mt-5 min-w-0">
-                    <h3
-                      className="
-                        truncate
-                        text-sm
-                        font-semibold
-                        text-slate-900
-                        dark:text-white
-                      "
-                      title={item.name}
-                    >
-                      {item.name}
-                    </h3>
-
-                    <div
-                      className="
-                        mt-2
-                        flex
-                        items-center
-                        gap-2
-                        text-xs
-                        text-slate-500
-                        dark:text-slate-400
-                      "
-                    >
-                      <span>
-                        {item.type ===
-                        "folder"
-                          ? "Folder"
-                          : formatSize(
-                              item.fileSize
-                            )}
-                      </span>
-
-                      <span>•</span>
-
-                      <span>
-                        {formatDate(
-                          item.createdAt
-                        )}
-                      </span>
-                    </div>
                   </div>
-
-                  {/* BOTTOM */}
-
-                  <div
-                    className="
-                      mt-4
-                      flex
-                      items-center
-                      justify-between
-                      border-t
-                      border-slate-100
-                      pt-3
-                      dark:border-slate-800
-                    "
-                  >
-                    <span
-                      className="
-                        text-[11px]
-                        font-medium
-                        uppercase
-                        tracking-wider
-                        text-slate-400
-                      "
-                    >
-                      {item.type}
-                    </span>
-
-                    <button
-                      type="button"
-                      disabled={
-                        unstarLoading ===
-                        item.id
-                      }
-                      onClick={() =>
-                        handleUnstar(
-                          item
-                        )
-                      }
-                      className="
-                        inline-flex
-                        items-center
-                        gap-1.5
-                        text-xs
-                        font-medium
-                        text-amber-500
-                        transition
-                        hover:text-amber-600
-                        disabled:opacity-50
-                        dark:text-amber-400
-                      "
-                    >
-                      <Star
-                        size={13}
-                        fill="currentColor"
-                      />
-                      Starred
-                    </button>
-                  </div>
-                </div>
-              )
+                );
+              }
             )}
           </div>
         ) : (
-          /* =========================
+          /* ===============================================
              LIST VIEW
-          ========================= */
+          =============================================== */
 
-          <div
-            className="
-              mt-6
-              overflow-hidden
-              rounded-2xl
-              border
-              border-slate-200
-              bg-white
-              shadow-sm
-              dark:border-slate-800
-              dark:bg-slate-900
-            "
-          >
-            {/* LIST HEADER */}
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.03]">
 
-            <div
-              className="
-                hidden
-                grid-cols-[minmax(260px,1fr)_120px_150px_90px]
-                items-center
-                gap-4
-                border-b
-                border-slate-200
-                bg-slate-50
-                px-5
-                py-3
-                text-xs
-                font-semibold
-                uppercase
-                tracking-wider
-                text-slate-400
-                md:grid
-                dark:border-slate-800
-                dark:bg-slate-950
-              "
-            >
+            {/* Desktop heading */}
+
+            <div className="hidden border-b border-slate-200 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 dark:border-white/10 md:grid md:grid-cols-[minmax(0,1fr)_120px_140px_70px] md:items-center md:gap-4">
               <span>Name</span>
-              <span>Type</span>
-              <span>Created</span>
-              <span></span>
+              <span>Size</span>
+              <span>Modified</span>
+              <span className="text-right">
+                Action
+              </span>
             </div>
 
-            {filteredItems.map(
-              (item) => (
-                <div
-                  key={`${item.type}-${item.id}`}
-                  className="
-                    group
-                    relative
-                    grid
-                    grid-cols-[1fr_auto]
-                    items-center
-                    gap-4
-                    border-b
-                    border-slate-100
-                    px-4
-                    py-4
-                    last:border-b-0
-                    hover:bg-slate-50
-                    md:grid-cols-[minmax(260px,1fr)_120px_150px_90px]
-                    md:px-5
-                    dark:border-slate-800
-                    dark:hover:bg-slate-800/50
-                  "
-                >
-                  {/* NAME */}
+            <div className="divide-y divide-slate-100 dark:divide-white/5">
 
-                  <div
-                    className="
-                      flex
-                      min-w-0
-                      items-center
-                      gap-3
-                    "
-                  >
+              {filteredFiles.map(
+                (file) => {
+                  const fileName =
+                    getFileName(file);
+
+                  const fileSize =
+                    getFileSize(file);
+
+                  const isRemoving =
+                    removingId ===
+                    file.id;
+
+                  return (
                     <div
-                      className={`
-                        flex
-                        h-10
-                        w-10
-                        shrink-0
-                        items-center
-                        justify-center
-                        rounded-xl
-                        ${
-                          item.type ===
-                          "folder"
-                            ? "bg-amber-50 text-amber-500 dark:bg-amber-500/10 dark:text-amber-400"
-                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                        }
-                      `}
+                      key={file.id}
+                      className={`group px-4 py-4 transition hover:bg-slate-50 dark:hover:bg-white/[0.02] ${
+                        isRemoving
+                          ? "opacity-60"
+                          : ""
+                      }`}
                     >
-                      {item.type ===
-                      "folder" ? (
-                        <Folder
-                          size={22}
-                          fill="currentColor"
-                        />
-                      ) : (
-                        getFileIcon(
-                          item.fileType,
-                          23
-                        )
-                      )}
-                    </div>
 
-                    <div className="min-w-0">
-                      <p
-                        className="
-                          truncate
-                          text-sm
-                          font-semibold
-                        "
-                        title={item.name}
-                      >
-                        {item.name}
-                      </p>
+                      <div className="flex items-center gap-3 md:grid md:grid-cols-[minmax(0,1fr)_120px_140px_70px] md:gap-4">
 
-                      <p
-                        className="
-                          mt-0.5
-                          truncate
-                          text-xs
-                          text-slate-400
-                        "
-                      >
-                        {item.type ===
-                        "folder"
-                          ? "Folder"
-                          : formatSize(
-                              item.fileSize
-                            )}
-                      </p>
-                    </div>
-                  </div>
+                        {/* File */}
 
-                  {/* TYPE */}
+                        <div className="flex min-w-0 items-center gap-3">
 
-                  <div
-                    className="
-                      hidden
-                      text-sm
-                      text-slate-500
-                      md:block
-                      dark:text-slate-400
-                    "
-                  >
-                    {item.type ===
-                    "folder"
-                      ? "Folder"
-                      : "File"}
-                  </div>
+                          <div
+                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${getIconClasses(
+                              file
+                            )}`}
+                          >
+                            <FileTypeIcon
+                              file={file}
+                              className="h-5 w-5"
+                            />
+                          </div>
 
-                  {/* DATE */}
-
-                  <div
-                    className="
-                      hidden
-                      text-sm
-                      text-slate-500
-                      md:block
-                      dark:text-slate-400
-                    "
-                  >
-                    {formatDate(
-                      item.createdAt
-                    )}
-                  </div>
-
-                  {/* ACTIONS */}
-
-                  <div
-                    className="
-                      flex
-                      items-center
-                      justify-end
-                      gap-1
-                    "
-                  >
-                    <button
-                      type="button"
-                      disabled={
-                        unstarLoading ===
-                        item.id
-                      }
-                      onClick={() =>
-                        handleUnstar(
-                          item
-                        )
-                      }
-                      title="Remove star"
-                      className="
-                        flex
-                        h-9
-                        w-9
-                        items-center
-                        justify-center
-                        rounded-lg
-                        text-amber-500
-                        transition
-                        hover:bg-amber-50
-                        dark:text-amber-400
-                        dark:hover:bg-amber-500/10
-                      "
-                    >
-                      {unstarLoading ===
-                      item.id ? (
-                        <Loader2
-                          size={17}
-                          className="animate-spin"
-                        />
-                      ) : (
-                        <Star
-                          size={17}
-                          fill="currentColor"
-                        />
-                      )}
-                    </button>
-
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenu(
-                            activeMenu ===
-                              item.id
-                              ? null
-                              : item.id
-                          );
-                        }}
-                        className="
-                          flex
-                          h-9
-                          w-9
-                          items-center
-                          justify-center
-                          rounded-lg
-                          text-slate-400
-                          hover:bg-slate-100
-                          hover:text-slate-700
-                          dark:hover:bg-slate-800
-                          dark:hover:text-white
-                        "
-                      >
-                        <MoreHorizontal
-                          size={18}
-                        />
-                      </button>
-
-                      {activeMenu ===
-                        item.id && (
-                        <div
-                          className="
-                            absolute
-                            right-0
-                            top-10
-                            z-40
-                            w-44
-                            overflow-hidden
-                            rounded-xl
-                            border
-                            border-slate-200
-                            bg-white
-                            p-1
-                            shadow-xl
-                            dark:border-slate-700
-                            dark:bg-slate-900
-                          "
-                          onClick={(e) =>
-                            e.stopPropagation()
-                          }
-                        >
-                          {item.type ===
-                            "file" && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleDownload(
-                                  item
-                                )
+                          <div className="min-w-0">
+                            <p
+                              title={
+                                fileName
                               }
-                              className="
-                                flex
-                                w-full
-                                items-center
-                                gap-2
-                                rounded-lg
-                                px-3
-                                py-2.5
-                                text-left
-                                text-sm
-                                text-slate-700
-                                hover:bg-slate-50
-                                dark:text-slate-200
-                                dark:hover:bg-slate-800
-                              "
+                              className="truncate text-sm font-semibold text-slate-800 dark:text-white"
                             >
-                              <Download
-                                size={16}
-                              />
-                              Download
-                            </button>
-                          )}
+                              {fileName}
+                            </p>
 
-                          {item.type ===
-                            "folder" && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setActiveMenu(
-                                  null
-                                );
-                                handleOpenFolder(
-                                  item.original as StarredFolder
-                                );
-                              }}
-                              className="
-                                flex
-                                w-full
-                                items-center
-                                gap-2
-                                rounded-lg
-                                px-3
-                                py-2.5
-                                text-left
-                                text-sm
-                                text-slate-700
-                                hover:bg-slate-50
-                                dark:text-slate-200
-                                dark:hover:bg-slate-800
-                              "
-                            >
-                              <Folder
-                                size={16}
-                              />
-                              Open folder
-                            </button>
+                            <div className="mt-1 flex items-center gap-2">
+                              <Star className="h-3 w-3 shrink-0 fill-amber-500 text-amber-500" />
+
+                              <span className="text-[11px] text-slate-400">
+                                Starred
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Size */}
+
+                        <div className="hidden text-xs text-slate-500 dark:text-slate-400 md:block">
+                          {formatFileSize(
+                            fileSize
                           )}
+                        </div>
+
+                        {/* Date */}
+
+                        <div className="hidden text-xs text-slate-500 dark:text-slate-400 md:block">
+                          {formatDate(
+                            file.updatedAt ||
+                              file.createdAt
+                          )}
+                        </div>
+
+                        {/* Actions */}
+
+                        <div className="ml-auto flex items-center gap-1">
 
                           <button
                             type="button"
                             onClick={() =>
-                              handleUnstar(
-                                item
+                              downloadFile(
+                                file
                               )
                             }
-                            className="
-                              flex
-                              w-full
-                              items-center
-                              gap-2
-                              rounded-lg
-                              px-3
-                              py-2.5
-                              text-left
-                              text-sm
-                              text-slate-700
-                              hover:bg-slate-50
-                              dark:text-slate-200
-                              dark:hover:bg-slate-800
-                            "
+                            title="Download"
+                            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
                           >
-                            <Star
-                              size={16}
-                            />
-                            Remove star
+                            <Download className="h-4 w-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={
+                              isRemoving
+                            }
+                            onClick={() =>
+                              handleUnstar(
+                                file
+                              )
+                            }
+                            title="Remove star"
+                            className="flex h-9 w-9 items-center justify-center rounded-lg text-amber-500 transition hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50 dark:hover:bg-amber-500/10"
+                          >
+                            {isRemoving ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Star className="h-4 w-4 fill-current" />
+                            )}
                           </button>
                         </div>
-                      )}
+                      </div>
+
+                      {/* Mobile details */}
+
+                      <div className="ml-[52px] mt-2 flex items-center gap-3 text-[11px] text-slate-400 md:hidden">
+                        <span>
+                          {formatFileSize(
+                            fileSize
+                          )}
+                        </span>
+
+                        <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
+
+                        <span>
+                          {formatDate(
+                            file.updatedAt ||
+                              file.createdAt
+                          )}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </div>
-              )
-            )}
+                  );
+                }
+              )}
+            </div>
           </div>
         )}
-
-        {/* =========================
-            FOOTER INFO
-        ========================= */}
-
-        {!loading &&
-          filteredItems.length >
-            0 && (
-            <div
-              className="
-                py-6
-                text-center
-                text-xs
-                text-slate-400
-              "
-            >
-              Showing{" "}
-              {filteredItems.length}{" "}
-              of {totalCount} starred{" "}
-              {totalCount === 1
-                ? "item"
-                : "items"}
-            </div>
-          )}
       </div>
     </div>
   );
 }
-
