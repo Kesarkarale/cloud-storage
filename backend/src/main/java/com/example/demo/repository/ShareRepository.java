@@ -14,16 +14,19 @@ public interface ShareRepository
             UUID ownerUserId
     );
 
-    List<FileShare> findBySharedWithEmailIgnoreCaseAndActiveTrue(
+    List<FileShare>
+    findBySharedWithEmailIgnoreCaseAndActiveTrue(
             String email
     );
 
-    Optional<FileShare> findByFileIdAndSharedWithEmailIgnoreCaseAndActiveTrue(
+    Optional<FileShare>
+    findByFileIdAndSharedWithEmailIgnoreCaseAndActiveTrue(
             UUID fileId,
             String email
     );
 
-    Optional<FileShare> findByIdAndActiveTrue(
+    Optional<FileShare>
+    findByIdAndActiveTrue(
             UUID id
     );
 }
