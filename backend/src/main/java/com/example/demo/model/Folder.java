@@ -11,11 +11,7 @@ import java.util.UUID;
         uniqueConstraints = {
                 @UniqueConstraint(
                         name = "uk_folder_user_parent_name",
-                        columnNames = {
-                                "user_id",
-                                "parent_folder_id",
-                                "name"
-                        }
+                        columnNames = {"user_id", "parent_folder_id", "name"}
                 )
         }
 )
@@ -37,38 +33,18 @@ public class Folder {
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
-    // =========================
-    // TRASH
-    // =========================
-
-    @Column(nullable = false)
-    private boolean deleted = false;
-
-    @Column(name = "deleted_at")
-    private LocalDateTime deletedAt;
-
-    // =========================
-    // STARRED / FAVOURITE
-    // =========================
-
-    @Column(nullable = false)
-    private boolean starred = false;
-
     public Folder() {
     }
+        @Column(nullable = false)
+private boolean deleted = false;
 
-    // =========================
-    // CREATED DATE
-    // =========================
+@Column(name = "deleted_at")
+private LocalDateTime deletedAt;
 
     @PrePersist
     public void onCreate() {
         createdAt = LocalDateTime.now();
     }
-
-    // =========================
-    // ID
-    // =========================
 
     public UUID getId() {
         return id;
@@ -78,10 +54,6 @@ public class Folder {
         this.id = id;
     }
 
-    // =========================
-    // NAME
-    // =========================
-
     public String getName() {
         return name;
     }
@@ -89,10 +61,6 @@ public class Folder {
     public void setName(String name) {
         this.name = name;
     }
-
-    // =========================
-    // USER ID
-    // =========================
 
     public UUID getUserId() {
         return userId;
@@ -102,10 +70,6 @@ public class Folder {
         this.userId = userId;
     }
 
-    // =========================
-    // PARENT FOLDER
-    // =========================
-
     public UUID getParentFolderId() {
         return parentFolderId;
     }
@@ -114,47 +78,22 @@ public class Folder {
         this.parentFolderId = parentFolderId;
     }
 
-    // =========================
-    // CREATED AT
-    // =========================
-
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
+        public boolean isDeleted() {
+    return deleted;
+}
 
-    // =========================
-    // DELETED
-    // =========================
+public void setDeleted(boolean deleted) {
+    this.deleted = deleted;
+}
 
-    public boolean isDeleted() {
-        return deleted;
-    }
+public LocalDateTime getDeletedAt() {
+    return deletedAt;
+}
 
-    public void setDeleted(boolean deleted) {
-        this.deleted = deleted;
-    }
-
-    // =========================
-    // DELETED AT
-    // =========================
-
-    public LocalDateTime getDeletedAt() {
-        return deletedAt;
-    }
-
-    public void setDeletedAt(LocalDateTime deletedAt) {
-        this.deletedAt = deletedAt;
-    }
-
-    // =========================
-    // STARRED
-    // =========================
-
-    public boolean isStarred() {
-        return starred;
-    }
-
-    public void setStarred(boolean starred) {
-        this.starred = starred;
-    }
+public void setDeletedAt(LocalDateTime deletedAt) {
+    this.deletedAt = deletedAt;
+}
 }
