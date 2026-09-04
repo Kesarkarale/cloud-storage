@@ -18,7 +18,6 @@ import {
   RefreshCw,
   Search,
   Star,
-  Trash2,
   X,
 } from "lucide-react";
 
@@ -35,6 +34,7 @@ type SortDirection = "asc" | "desc";
 
 interface StarredFile {
   id: string;
+
   name?: string;
   fileName?: string;
   originalFileName?: string;
@@ -94,7 +94,7 @@ function getAuthToken(): string | null {
    AUTH HEADERS
 ========================================================= */
 
-function getAuthHeaders(): HeadersInit {
+function getAuthHeaders(): Record<string, string> {
   const token = getAuthToken();
 
   return {
@@ -516,9 +516,9 @@ async function downloadFile(
   }
 
   /*
-    If your backend later provides a dedicated
-    download endpoint, this fallback can be
-    adjusted according to that endpoint.
+    Fallback endpoint.
+    If your backend has a dedicated download
+    endpoint, this can be used.
   */
 
   const endpoint =
@@ -586,6 +586,7 @@ function SkeletonCard() {
     <div className="animate-pulse rounded-2xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.03]">
       <div className="mb-5 flex items-center justify-between">
         <div className="h-12 w-12 rounded-xl bg-slate-200 dark:bg-white/10" />
+
         <div className="h-8 w-8 rounded-lg bg-slate-200 dark:bg-white/10" />
       </div>
 
@@ -703,6 +704,7 @@ export default function StarredPage() {
 
           /*
             Supports:
+
             [
               ...
             ]
@@ -969,8 +971,10 @@ export default function StarredPage() {
     return (
       <div className="min-h-[calc(100vh-5rem)] bg-slate-50 px-4 py-6 transition-colors duration-300 dark:bg-slate-950 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
+
           <div className="mb-8">
             <div className="flex items-center gap-3">
+
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-500/10">
                 <Star className="h-5 w-5 fill-amber-500 text-amber-500" />
               </div>
@@ -984,16 +988,20 @@ export default function StarredPage() {
                   Quickly access your important files.
                 </p>
               </div>
+
             </div>
           </div>
 
           <div className="rounded-2xl border border-red-200 bg-red-50 p-6 dark:border-red-500/20 dark:bg-red-500/5">
+
             <div className="flex items-start gap-4">
+
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 dark:bg-red-500/10">
                 <X className="h-5 w-5 text-red-600 dark:text-red-400" />
               </div>
 
               <div className="flex-1">
+
                 <h2 className="font-semibold text-red-800 dark:text-red-300">
                   Unable to load starred files
                 </h2>
@@ -1012,9 +1020,13 @@ export default function StarredPage() {
                   <RefreshCw className="h-4 w-4" />
                   Try again
                 </button>
+
               </div>
+
             </div>
+
           </div>
+
         </div>
       </div>
     );
@@ -1054,6 +1066,7 @@ export default function StarredPage() {
                 Your important files, all in one place.
               </p>
             </div>
+
           </div>
 
           <div className="flex items-center gap-2">
@@ -1082,7 +1095,9 @@ export default function StarredPage() {
                 Refresh
               </span>
             </button>
+
           </div>
+
         </div>
 
         {/* =================================================
@@ -1120,6 +1135,7 @@ export default function StarredPage() {
                 <X className="h-4 w-4" />
               </button>
             )}
+
           </div>
 
           {/* Sort */}
@@ -1190,7 +1206,9 @@ export default function StarredPage() {
             >
               <List className="h-4 w-4" />
             </button>
+
           </div>
+
         </div>
 
         {/* =================================================
@@ -1199,6 +1217,7 @@ export default function StarredPage() {
 
         {!loading && (
           <div className="mb-4 flex items-center justify-between">
+
             <p className="text-xs font-medium text-slate-400">
               {searchQuery
                 ? `${filteredFiles.length} ${
@@ -1213,6 +1232,7 @@ export default function StarredPage() {
                       : "starred files"
                   }`}
             </p>
+
           </div>
         )}
 
@@ -1238,6 +1258,7 @@ export default function StarredPage() {
           </div>
         ) : filteredFiles.length ===
           0 ? (
+
           /* ===============================================
              EMPTY STATE
           =============================================== */
@@ -1284,9 +1305,12 @@ export default function StarredPage() {
                 </p>
               </>
             )}
+
           </div>
+
         ) : viewMode ===
           "grid" ? (
+
           /* ===============================================
              GRID VIEW
           =============================================== */
@@ -1371,6 +1395,7 @@ export default function StarredPage() {
                               }
                               className="absolute right-0 top-10 z-20 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-slate-900"
                             >
+
                               <button
                                 type="button"
                                 onClick={() =>
@@ -1401,17 +1426,23 @@ export default function StarredPage() {
                                 ) : (
                                   <Star className="h-4 w-4 fill-current" />
                                 )}
+
                                 Remove star
                               </button>
+
                             </div>
                           )}
+
                         </div>
+
                       </div>
+
                     </div>
 
                     {/* Name */}
 
                     <div className="min-w-0">
+
                       <h3
                         title={fileName}
                         className="truncate text-sm font-semibold text-slate-900 dark:text-white"
@@ -1424,6 +1455,7 @@ export default function StarredPage() {
                           fileSize
                         )}
                       </p>
+
                     </div>
 
                     {/* Bottom */}
@@ -1456,13 +1488,18 @@ export default function StarredPage() {
                           <Star className="h-4 w-4 fill-current" />
                         )}
                       </button>
+
                     </div>
+
                   </div>
                 );
               }
             )}
+
           </div>
+
         ) : (
+
           /* ===============================================
              LIST VIEW
           =============================================== */
@@ -1472,12 +1509,15 @@ export default function StarredPage() {
             {/* Desktop heading */}
 
             <div className="hidden border-b border-slate-200 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 dark:border-white/10 md:grid md:grid-cols-[minmax(0,1fr)_120px_140px_70px] md:items-center md:gap-4">
+
               <span>Name</span>
               <span>Size</span>
               <span>Modified</span>
+
               <span className="text-right">
                 Action
               </span>
+
             </div>
 
             <div className="divide-y divide-slate-100 dark:divide-white/5">
@@ -1522,6 +1562,7 @@ export default function StarredPage() {
                           </div>
 
                           <div className="min-w-0">
+
                             <p
                               title={
                                 fileName
@@ -1532,13 +1573,17 @@ export default function StarredPage() {
                             </p>
 
                             <div className="mt-1 flex items-center gap-2">
+
                               <Star className="h-3 w-3 shrink-0 fill-amber-500 text-amber-500" />
 
                               <span className="text-[11px] text-slate-400">
                                 Starred
                               </span>
+
                             </div>
+
                           </div>
+
                         </div>
 
                         {/* Size */}
@@ -1594,12 +1639,15 @@ export default function StarredPage() {
                               <Star className="h-4 w-4 fill-current" />
                             )}
                           </button>
+
                         </div>
+
                       </div>
 
                       {/* Mobile details */}
 
                       <div className="ml-[52px] mt-2 flex items-center gap-3 text-[11px] text-slate-400 md:hidden">
+
                         <span>
                           {formatFileSize(
                             fileSize
@@ -1614,14 +1662,19 @@ export default function StarredPage() {
                               file.createdAt
                           )}
                         </span>
+
                       </div>
+
                     </div>
                   );
                 }
               )}
+
             </div>
+
           </div>
         )}
+
       </div>
     </div>
   );
