@@ -23,6 +23,7 @@ import {
   MoreHorizontal,
   RefreshCw,
   Search,
+  Share2,
   Star,
   Trash2,
   Upload,
@@ -561,6 +562,9 @@ export default function FilesPage() {
     useState(false);
 
   const [selectedFile, setSelectedFile] =
+    useState<FileItem | null>(null);
+
+  const [shareFile, setShareFile] =
     useState<FileItem | null>(null);
 
   const [previewFile, setPreviewFile] =
@@ -1454,6 +1458,78 @@ export default function FilesPage() {
   };
 
   /* =======================================================
+     SHARE FILE
+  ======================================================= */
+
+  const shareFileWithUser = async (
+    file: FileItem,
+    email: string,
+    permission: "VIEWER" | "EDITOR"
+  ) => {
+    const token = getToken();
+
+    if (!token) {
+      showToast(
+        "error",
+        "Please login again."
+      );
+      return false;
+    }
+
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail) {
+      showToast(
+        "error",
+        "Please enter an email address."
+      );
+      return false;
+    }
+
+    try {
+      const params = new URLSearchParams({
+        fileId: file.id,
+        email: cleanEmail,
+        permission,
+      });
+
+      const response = await fetch(
+        `${API_BASE}/api/shares?${params.toString()}`,
+        {
+          method: "POST",
+          headers: authHeaders(),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await parseApiError(response)
+        );
+      }
+
+      showToast(
+        "success",
+        `"${file.fileName}" shared successfully.`
+      );
+
+      return true;
+    } catch (err: any) {
+      console.error(
+        "Share file error:",
+        err
+      );
+
+      showToast(
+        "error",
+        err?.message ||
+          "Unable to share file. Please try again."
+      );
+
+      return false;
+    }
+  };
+
+  /* =======================================================
      DELETE CONFIRMATION
   ======================================================= */
 
@@ -2330,6 +2406,9 @@ export default function FilesPage() {
                             onToggleStar={
                               toggleStar
                             }
+                            onShare={() =>
+                              setShareFile(file)
+                            }
                             isStarred={isItemStarred(
                               file.id,
                               "file"
@@ -2374,6 +2453,9 @@ export default function FilesPage() {
                             }
                             onToggleStar={
                               toggleStar
+                            }
+                            onShare={() =>
+                              setShareFile(file)
                             }
                             isStarred={isItemStarred(
                               file.id,
@@ -2709,6 +2791,9 @@ export default function FilesPage() {
           onDelete={
             requestDeleteFile
           }
+          onShare={() =>
+            setShareFile(selectedFile)
+          }
           downloading={
             downloadingId ===
             selectedFile.id
@@ -2717,6 +2802,16 @@ export default function FilesPage() {
             deletingId ===
             selectedFile.id
           }
+        />
+      )}
+
+      {shareFile && (
+        <ShareFileModal
+          file={shareFile}
+          onClose={() =>
+            setShareFile(null)
+          }
+          onShare={shareFileWithUser}
         />
       )}
 
@@ -3419,6 +3514,7 @@ function FileCard({
   onPreview,
   onDownload,
   onDelete,
+  onShare,
   downloading,
   deleting,
   onToggleStar,
@@ -3437,6 +3533,7 @@ function FileCard({
     file: FileItem,
     event?: MouseEvent
   ) => void;
+  onShare: () => void;
   downloading: boolean;
   deleting: boolean;
   onToggleStar: (
@@ -3553,6 +3650,19 @@ function FileCard({
           )}
 
           <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onShare();
+            }}
+            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+            title="Share"
+            aria-label={`Share ${file.fileName}`}
+          >
+            <Share2 size={17} />
+          </button>
+
+          <button
             disabled={
               downloading
             }
@@ -3620,6 +3730,7 @@ function FileListItem({
   onPreview,
   onDownload,
   onDelete,
+  onShare,
   downloading,
   deleting,
   onToggleStar,
@@ -3717,6 +3828,19 @@ function FileListItem({
         />
 
         <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onShare();
+          }}
+          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+          title="Share"
+          aria-label={`Share ${file.fileName}`}
+        >
+          <Share2 size={17} />
+        </button>
+
+        <button
           disabled={
             downloading
           }
@@ -3784,6 +3908,7 @@ function FileDetailsModal({
   onPreview,
   onDownload,
   onDelete,
+  onShare,
   downloading,
   deleting,
 }: {
@@ -3801,6 +3926,7 @@ function FileDetailsModal({
     file: FileItem,
     event?: MouseEvent
   ) => void;
+  onShare: () => void;
   downloading: boolean;
   deleting: boolean;
 }) {
@@ -3885,6 +4011,15 @@ function FileDetailsModal({
           )}
 
           <button
+            type="button"
+            onClick={onShare}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+          >
+            <Share2 size={17} />
+            Share
+          </button>
+
+          <button
             disabled={
               downloading
             }
@@ -3932,6 +4067,194 @@ function FileDetailsModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* =========================================================
+   SHARE FILE MODAL
+========================================================= */
+
+function ShareFileModal({
+  file,
+  onClose,
+  onShare,
+}: {
+  file: FileItem;
+  onClose: () => void;
+  onShare: (
+    file: FileItem,
+    email: string,
+    permission: "VIEWER" | "EDITOR"
+  ) => Promise<boolean>;
+}) {
+  const [email, setEmail] = useState("");
+  const [permission, setPermission] =
+    useState<"VIEWER" | "EDITOR">("VIEWER");
+  const [sharing, setSharing] = useState(false);
+
+  const handleSubmit = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+
+    if (!email.trim()) return;
+
+    setSharing(true);
+
+    const success = await onShare(
+      file,
+      email,
+      permission
+    );
+
+    setSharing(false);
+
+    if (success) {
+      onClose();
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (
+          event.target === event.currentTarget &&
+          !sharing
+        ) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="w-full max-w-md overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="share-file-title"
+      >
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <Share2 size={19} />
+            </div>
+            <div className="min-w-0">
+              <h2
+                id="share-file-title"
+                className="text-lg font-bold text-slate-900 dark:text-white"
+              >
+                Share file
+              </h2>
+              <p className="max-w-[270px] truncate text-xs text-slate-500 dark:text-slate-400">
+                {file.fileName}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={sharing}
+            className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 dark:hover:bg-slate-900 dark:hover:text-white"
+            aria-label="Close share dialog"
+          >
+            <X size={19} />
+          </button>
+        </div>
+
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-5 p-5"
+        >
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+              Email address
+            </label>
+            <input
+              autoFocus
+              type="email"
+              value={email}
+              onChange={(event) =>
+                setEmail(event.target.value)
+              }
+              placeholder="Enter recipient email"
+              disabled={sharing}
+              className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200 disabled:opacity-60 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:border-slate-700 dark:focus:ring-slate-800"
+            />
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              The recipient must have an account in your Cloud Storage app.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
+              Permission
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={sharing}
+                onClick={() =>
+                  setPermission("VIEWER")
+                }
+                className={`rounded-xl border px-3 py-3 text-left transition ${
+                  permission === "VIEWER"
+                    ? "border-slate-900 bg-slate-50 text-slate-900 dark:border-white dark:bg-slate-900 dark:text-white"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-900"
+                }`}
+              >
+                <p className="text-sm font-semibold">Viewer</p>
+                <p className="mt-0.5 text-xs opacity-70">
+                  Can view the file
+                </p>
+              </button>
+
+              <button
+                type="button"
+                disabled={sharing}
+                onClick={() =>
+                  setPermission("EDITOR")
+                }
+                className={`rounded-xl border px-3 py-3 text-left transition ${
+                  permission === "EDITOR"
+                    ? "border-slate-900 bg-slate-50 text-slate-900 dark:border-white dark:bg-slate-900 dark:text-white"
+                    : "border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-400 dark:hover:bg-slate-900"
+                }`}
+              >
+                <p className="text-sm font-semibold">Editor</p>
+                <p className="mt-0.5 text-xs opacity-70">
+                  Can edit the file
+                </p>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <button
+              type="button"
+              disabled={sharing}
+              onClick={onClose}
+              className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={sharing || !email.trim()}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+            >
+              {sharing && (
+                <Loader2
+                  size={17}
+                  className="animate-spin"
+                />
+              )}
+              {sharing ? "Sharing..." : "Share"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
