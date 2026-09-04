@@ -40,6 +40,9 @@ public class File {
     @Column
     private LocalDateTime deletedAt;
 
+    @Column(nullable = false, columnDefinition = "boolean default false")
+private boolean starred = false;
+    
     public File() {
     }
 
@@ -127,4 +130,12 @@ public class File {
     public void setDeletedAt(LocalDateTime deletedAt) {
         this.deletedAt = deletedAt;
     }
+
+    public boolean isStarred() {
+    return starred;
+}
+
+public void setStarred(boolean starred) {
+    this.starred = starred;
+}
 }
