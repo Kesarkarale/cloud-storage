@@ -969,6 +969,7 @@ export default function StarredPage() {
     files.length === 0
   ) {
     return (
+       <DashboardShell>
       <div className="min-h-[calc(100vh-5rem)] bg-slate-50 px-4 py-6 transition-colors duration-300 dark:bg-slate-950 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
 
@@ -1677,5 +1678,6 @@ export default function StarredPage() {
 
       </div>
     </div>
+       </DashboardShell>
   );
 }
