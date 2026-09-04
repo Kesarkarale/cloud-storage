@@ -1,13 +1,16 @@
 package com.example.demo.controller;
 
 import com.example.demo.model.File;
+import com.example.demo.model.Folder;
 import com.example.demo.model.User;
 import com.example.demo.service.FileService;
+import com.example.demo.service.FolderService;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -16,9 +19,14 @@ import java.util.UUID;
 public class TrashController {
 
     private final FileService fileService;
+    private final FolderService folderService;
 
-    public TrashController(FileService fileService) {
+    public TrashController(
+            FileService fileService,
+            FolderService folderService
+    ) {
         this.fileService = fileService;
+        this.folderService = folderService;
     }
 
     private UUID getCurrentUserId(
@@ -48,70 +56,110 @@ public class TrashController {
         return user.getId();
     }
 
+
     // =========================
     // GET TRASH
     // =========================
 
     @GetMapping
-    public ResponseEntity<List<File>> getTrash(
+    public ResponseEntity<List<Object>> getTrash(
             Authentication authentication
     ) {
 
         UUID userId =
                 getCurrentUserId(authentication);
 
-        return ResponseEntity.ok(
-                fileService.getTrashFiles(
-                        userId
-                )
-        );
+        List<File> files =
+                fileService.getTrashFiles(userId);
+
+        List<Folder> folders =
+                folderService.getTrashFolders(userId);
+
+        List<Object> trashItems =
+                new ArrayList<>();
+
+        trashItems.addAll(files);
+        trashItems.addAll(folders);
+
+        return ResponseEntity.ok(trashItems);
     }
+
 
     // =========================
     // RESTORE
     // =========================
 
-    @PostMapping("/{fileId}/restore")
-    public ResponseEntity<String> restoreFile(
-            @PathVariable UUID fileId,
+    @PostMapping("/{id}/restore")
+    public ResponseEntity<String> restoreItem(
+            @PathVariable UUID id,
             Authentication authentication
     ) {
 
         UUID userId =
                 getCurrentUserId(authentication);
 
-        fileService.restoreFile(
-                fileId,
-                userId
-        );
+        try {
 
-        return ResponseEntity.ok(
-                "File restored successfully"
-        );
+            fileService.restoreFile(
+                    id,
+                    userId
+            );
+
+            return ResponseEntity.ok(
+                    "File restored successfully"
+            );
+
+        } catch (RuntimeException fileException) {
+
+            folderService.restoreFolder(
+                    id,
+                    userId
+            );
+
+            return ResponseEntity.ok(
+                    "Folder restored successfully"
+            );
+        }
     }
+
 
     // =========================
     // PERMANENT DELETE
     // =========================
 
-    @DeleteMapping("/{fileId}")
+    @DeleteMapping("/{id}")
     public ResponseEntity<String> permanentlyDelete(
-            @PathVariable UUID fileId,
+            @PathVariable UUID id,
             Authentication authentication
     ) {
 
         UUID userId =
                 getCurrentUserId(authentication);
 
-        fileService.permanentlyDeleteFile(
-                fileId,
-                userId
-        );
+        try {
 
-        return ResponseEntity.ok(
-                "File permanently deleted"
-        );
+            fileService.permanentlyDeleteFile(
+                    id,
+                    userId
+            );
+
+            return ResponseEntity.ok(
+                    "File permanently deleted"
+            );
+
+        } catch (RuntimeException fileException) {
+
+            folderService.permanentlyDeleteFolder(
+                    id,
+                    userId
+            );
+
+            return ResponseEntity.ok(
+                    "Folder permanently deleted"
+            );
+        }
     }
+
 
     // =========================
     // EMPTY TRASH
@@ -125,9 +173,23 @@ public class TrashController {
         UUID userId =
                 getCurrentUserId(authentication);
 
-        fileService.emptyTrash(
-                userId
-        );
+        fileService.emptyTrash(userId);
+
+        List<Folder> folders =
+                folderService.getTrashFolders(userId);
+
+        for (Folder folder : folders) {
+
+            try {
+
+                folderService.permanentlyDeleteFolder(
+                        folder.getId(),
+                        userId
+                );
+
+            } catch (RuntimeException ignored) {
+            }
+        }
 
         return ResponseEntity.ok(
                 "Trash emptied successfully"
