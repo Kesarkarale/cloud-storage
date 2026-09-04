@@ -472,9 +472,7 @@ export default function TrashPage() {
     useState<string | null>(null);
 
   const loadTrash = useCallback(
-  async (
-    showRefreshLoader = false
-  ) => {
+  async (showRefreshLoader = false) => {
     try {
       if (showRefreshLoader) {
         setRefreshing(true);
@@ -484,108 +482,67 @@ export default function TrashPage() {
 
       setError(null);
 
-      // Fetch files and folders separately
-      const [trashData, folderData] =
-        await Promise.all([
-          apiRequest("/api/trash"),
-          apiRequest("/api/folders/trash"),
-        ]);
+      // IMPORTANT:
+      // /api/trash already returns BOTH files and folders.
+      // Do NOT call /api/folders/trash here.
+      const trashData =
+        await apiRequest("/api/trash");
 
       let backendItems: BackendTrashItem[] = [];
 
       // =========================
-      // FILES FROM /api/trash
+      // TRASH DATA
       // =========================
 
       if (Array.isArray(trashData)) {
-        backendItems.push(...trashData);
+        backendItems = trashData;
       } else if (
         trashData &&
         Array.isArray(trashData.content)
       ) {
-        backendItems.push(
-          ...trashData.content
-        );
+        backendItems = trashData.content;
       } else if (
         trashData &&
         Array.isArray(trashData.items)
       ) {
-        backendItems.push(
-          ...trashData.items
-        );
+        backendItems = trashData.items;
       } else if (
         trashData &&
         Array.isArray(trashData.files)
       ) {
-        backendItems.push(
-          ...trashData.files
-        );
+        backendItems = trashData.files;
       } else if (
         trashData &&
         Array.isArray(trashData.data)
       ) {
-        backendItems.push(
-          ...trashData.data
-        );
+        backendItems = trashData.data;
       }
 
       // =========================
-      // FOLDERS FROM /api/folders/trash
-      // =========================
-
-      if (Array.isArray(folderData)) {
-        backendItems.push(
-          ...folderData.map(
-            (folder: BackendTrashItem) => ({
-              ...folder,
-
-              // Explicitly mark as folder
-              folder: true,
-              isFolder: true,
-            })
-          )
-        );
-      } else if (
-        folderData &&
-        Array.isArray(folderData.content)
-      ) {
-        backendItems.push(
-          ...folderData.content.map(
-            (folder: BackendTrashItem) => ({
-              ...folder,
-              folder: true,
-              isFolder: true,
-            })
-          )
-        );
-      } else if (
-        folderData &&
-        Array.isArray(folderData.items)
-      ) {
-        backendItems.push(
-          ...folderData.items.map(
-            (folder: BackendTrashItem) => ({
-              ...folder,
-              folder: true,
-              isFolder: true,
-            })
-          )
-        );
-      }
-
-      // =========================
-      // REMOVE DUPLICATES
+      // REMOVE EXACT DUPLICATES
       // =========================
 
       const uniqueItems =
         Array.from(
           new Map(
-            backendItems.map((item) => [
-              `${item.folder === true || item.isFolder === true ? "folder" : "file"}:${item.id}`,
-              item,
-            ])
+            backendItems.map((item) => {
+              const detectedType =
+                item.folder === true ||
+                item.isFolder === true
+                  ? "folder"
+                  : "file";
+
+              return [
+                `${detectedType}:${String(item.id)}`,
+                item,
+              ];
+            })
           ).values()
         );
+
+      // =========================
+      // NORMALIZE
+      // =========================
 
       const normalized =
         uniqueItems.map(
@@ -594,9 +551,7 @@ export default function TrashPage() {
 
       setItems(normalized);
 
-      setSelectedIds(
-        new Set()
-      );
+      setSelectedIds(new Set());
     } catch (err) {
       console.error(
         "Trash loading error:",
