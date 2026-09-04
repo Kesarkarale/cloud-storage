@@ -29,7 +29,7 @@ import {
   useState,
 } from "react";
 
-import DashboardShell from "../../components/DashboardShell";
+import DashboardShell from "@/app/components/DashboardShell";
 
 type ViewMode = "grid" | "list";
 type SortDirection = "asc" | "desc";
