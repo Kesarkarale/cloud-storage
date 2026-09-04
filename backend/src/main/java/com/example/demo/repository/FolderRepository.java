@@ -9,6 +9,10 @@ import java.util.Optional;
 
 public interface FolderRepository extends JpaRepository<Folder, UUID> {
 
+    // =========================
+    // ALL FOLDERS
+    // =========================
+
     List<Folder> findByUserIdAndParentFolderId(
             UUID userId,
             UUID parentFolderId
@@ -17,21 +21,43 @@ public interface FolderRepository extends JpaRepository<Folder, UUID> {
     List<Folder> findByUserIdAndParentFolderIdIsNull(
             UUID userId
     );
+
+    // =========================
+    // ACTIVE FOLDERS
+    // =========================
+
     List<Folder> findByUserIdAndParentFolderIdAndDeletedFalse(
-        UUID userId,
-        UUID parentFolderId
-);
+            UUID userId,
+            UUID parentFolderId
+    );
 
-List<Folder> findByUserIdAndParentFolderIdIsNullAndDeletedFalse(
-        UUID userId
-);
+    List<Folder> findByUserIdAndParentFolderIdIsNullAndDeletedFalse(
+            UUID userId
+    );
 
-List<Folder> findByUserIdAndDeletedTrue(
-        UUID userId
-);
+    // =========================
+    // TRASH FOLDERS
+    // =========================
 
-Optional<Folder> findByIdAndUserIdAndDeletedTrue(
-        UUID id,
-        UUID userId
-);
+    List<Folder> findByUserIdAndDeletedTrue(
+            UUID userId
+    );
+
+    Optional<Folder> findByIdAndUserIdAndDeletedTrue(
+            UUID id,
+            UUID userId
+    );
+
+    // =========================
+    // STARRED / FAVOURITE
+    // =========================
+
+    List<Folder> findByUserIdAndStarredTrueAndDeletedFalse(
+            UUID userId
+    );
+
+    Optional<Folder> findByIdAndUserIdAndDeletedFalse(
+            UUID id,
+            UUID userId
+    );
 }
