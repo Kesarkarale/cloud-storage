@@ -29,9 +29,7 @@ public class TrashController {
         this.folderService = folderService;
     }
 
-    private UUID getCurrentUserId(
-            Authentication authentication
-    ) {
+    private UUID getCurrentUserId(Authentication authentication) {
 
         if (authentication == null ||
                 authentication.getPrincipal() == null) {
@@ -41,8 +39,7 @@ public class TrashController {
             );
         }
 
-        Object principal =
-                authentication.getPrincipal();
+        Object principal = authentication.getPrincipal();
 
         if (!(principal instanceof User)) {
 
@@ -51,11 +48,8 @@ public class TrashController {
             );
         }
 
-        User user = (User) principal;
-
-        return user.getId();
+        return ((User) principal).getId();
     }
-
 
     // =========================
     // GET TRASH
@@ -66,8 +60,7 @@ public class TrashController {
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
         List<File> files =
                 fileService.getTrashFiles(userId);
@@ -75,15 +68,16 @@ public class TrashController {
         List<Folder> folders =
                 folderService.getTrashFolders(userId);
 
-        List<Object> trashItems =
-                new ArrayList<>();
+        List<Object> trashItems = new ArrayList<>();
 
+        // Files
         trashItems.addAll(files);
+
+        // Folders
         trashItems.addAll(folders);
 
         return ResponseEntity.ok(trashItems);
     }
-
 
     // =========================
     // RESTORE
@@ -95,33 +89,28 @@ public class TrashController {
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
+        // First check file
         try {
 
-            fileService.restoreFile(
-                    id,
-                    userId
-            );
+            fileService.restoreFile(id, userId);
 
             return ResponseEntity.ok(
                     "File restored successfully"
             );
 
-        } catch (RuntimeException fileException) {
-
-            folderService.restoreFolder(
-                    id,
-                    userId
-            );
-
-            return ResponseEntity.ok(
-                    "Folder restored successfully"
-            );
+        } catch (RuntimeException ignored) {
+            // Not a file, try folder
         }
-    }
 
+        // Then folder
+        folderService.restoreFolder(id, userId);
+
+        return ResponseEntity.ok(
+                "Folder restored successfully"
+        );
+    }
 
     // =========================
     // PERMANENT DELETE
@@ -133,9 +122,9 @@ public class TrashController {
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
+        // First check file
         try {
 
             fileService.permanentlyDeleteFile(
@@ -147,19 +136,20 @@ public class TrashController {
                     "File permanently deleted"
             );
 
-        } catch (RuntimeException fileException) {
-
-            folderService.permanentlyDeleteFolder(
-                    id,
-                    userId
-            );
-
-            return ResponseEntity.ok(
-                    "Folder permanently deleted"
-            );
+        } catch (RuntimeException ignored) {
+            // Not a file, try folder
         }
-    }
 
+        // Then folder
+        folderService.permanentlyDeleteFolder(
+                id,
+                userId
+        );
+
+        return ResponseEntity.ok(
+                "Folder permanently deleted"
+        );
+    }
 
     // =========================
     // EMPTY TRASH
@@ -170,13 +160,16 @@ public class TrashController {
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
+        // Delete all trashed files
         fileService.emptyTrash(userId);
 
+        // Delete all trashed folders
         List<Folder> folders =
-                folderService.getTrashFolders(userId);
+                new ArrayList<>(
+                        folderService.getTrashFolders(userId)
+                );
 
         for (Folder folder : folders) {
 
