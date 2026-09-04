@@ -23,6 +23,7 @@ import {
   MoreHorizontal,
   RefreshCw,
   Search,
+  Star,
   Trash2,
   Upload,
   X,
@@ -84,6 +85,13 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 /* =========================================================
+   STARRED STORAGE
+========================================================= */
+
+const STARRED_STORAGE_KEY =
+  "cloudstorage-starred-items";
+
+/* =========================================================
    HELPERS
 ========================================================= */
 
@@ -127,7 +135,8 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 
 async function parseApiError(response: Response): Promise<string> {
   try {
-    const contentType = response.headers.get("content-type") || "";
+    const contentType =
+      response.headers.get("content-type") || "";
 
     if (contentType.includes("application/json")) {
       const data = await response.json();
@@ -165,7 +174,9 @@ function normalizeFile(value: any): FileItem {
       value?.contentType ??
       value?.mimeType ??
       "application/octet-stream",
-    fileSize: Number(value?.fileSize ?? value?.size ?? 0),
+    fileSize: Number(
+      value?.fileSize ?? value?.size ?? 0
+    ),
     filePath: value?.filePath,
     userId: value?.userId,
     parentFolderId:
@@ -204,18 +215,29 @@ function formatFileSize(bytes: number): string {
     return "0 B";
   }
 
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  const units = [
+    "B",
+    "KB",
+    "MB",
+    "GB",
+    "TB",
+  ];
 
   const index = Math.min(
     Math.floor(Math.log(bytes) / Math.log(1024)),
     units.length - 1
   );
 
-  const size = bytes / Math.pow(1024, index);
+  const size =
+    bytes / Math.pow(1024, index);
 
-  return `${size.toFixed(index === 0 ? 0 : size >= 10 ? 1 : 2)} ${
-    units[index]
-  }`;
+  return `${size.toFixed(
+    index === 0
+      ? 0
+      : size >= 10
+      ? 1
+      : 2
+  )} ${units[index]}`;
 }
 
 function formatDate(value?: string): string {
@@ -227,11 +249,14 @@ function formatDate(value?: string): string {
     return "—";
   }
 
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
+  return new Intl.DateTimeFormat(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }
+  ).format(date);
 }
 
 function formatDateTime(value?: string): string {
@@ -243,13 +268,16 @@ function formatDateTime(value?: string): string {
     return "—";
   }
 
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return new Intl.DateTimeFormat(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  ).format(date);
 }
 
 function getExtension(fileName: string): string {
@@ -260,22 +288,43 @@ function getExtension(fileName: string): string {
   return parts.pop()?.toLowerCase() || "";
 }
 
-function getFileCategory(file: FileItem): string {
-  const type = file.fileType?.toLowerCase() || "";
-  const ext = getExtension(file.fileName);
+function getFileCategory(
+  file: FileItem
+): string {
+  const type =
+    file.fileType?.toLowerCase() || "";
 
-  if (type.startsWith("image/")) return "image";
+  const ext = getExtension(
+    file.fileName
+  );
+
+  if (type.startsWith("image/")) {
+    return "image";
+  }
 
   if (
     type.startsWith("video/") ||
-    ["mp4", "webm", "mov", "mkv", "avi"].includes(ext)
+    [
+      "mp4",
+      "webm",
+      "mov",
+      "mkv",
+      "avi",
+    ].includes(ext)
   ) {
     return "video";
   }
 
   if (
     type.startsWith("audio/") ||
-    ["mp3", "wav", "ogg", "m4a", "aac", "flac"].includes(ext)
+    [
+      "mp3",
+      "wav",
+      "ogg",
+      "m4a",
+      "aac",
+      "flac",
+    ].includes(ext)
   ) {
     return "audio";
   }
@@ -290,7 +339,11 @@ function getFileCategory(file: FileItem): string {
   if (
     type.includes("spreadsheet") ||
     type.includes("excel") ||
-    ["xls", "xlsx", "csv"].includes(ext)
+    [
+      "xls",
+      "xlsx",
+      "csv",
+    ].includes(ext)
   ) {
     return "spreadsheet";
   }
@@ -299,7 +352,13 @@ function getFileCategory(file: FileItem): string {
     type.includes("zip") ||
     type.includes("rar") ||
     type.includes("7z") ||
-    ["zip", "rar", "7z", "tar", "gz"].includes(ext)
+    [
+      "zip",
+      "rar",
+      "7z",
+      "tar",
+      "gz",
+    ].includes(ext)
   ) {
     return "archive";
   }
@@ -308,7 +367,12 @@ function getFileCategory(file: FileItem): string {
     type.includes("text") ||
     type.includes("word") ||
     type.includes("document") ||
-    ["txt", "doc", "docx", "rtf"].includes(ext)
+    [
+      "txt",
+      "doc",
+      "docx",
+      "rtf",
+    ].includes(ext)
   ) {
     return "document";
   }
@@ -319,7 +383,15 @@ function getFileCategory(file: FileItem): string {
     type.includes("json") ||
     type.includes("html") ||
     type.includes("css") ||
-    ["js", "jsx", "ts", "tsx", "json", "html", "css"].includes(ext)
+    [
+      "js",
+      "jsx",
+      "ts",
+      "tsx",
+      "json",
+      "html",
+      "css",
+    ].includes(ext)
   ) {
     return "code";
   }
@@ -327,8 +399,12 @@ function getFileCategory(file: FileItem): string {
   return "other";
 }
 
-function getFileIcon(file: FileItem, size = 28) {
-  const category = getFileCategory(file);
+function getFileIcon(
+  file: FileItem,
+  size = 28
+) {
+  const category =
+    getFileCategory(file);
 
   switch (category) {
     case "image":
@@ -345,10 +421,14 @@ function getFileIcon(file: FileItem, size = 28) {
       return <FileText size={size} />;
 
     case "spreadsheet":
-      return <FileSpreadsheet size={size} />;
+      return (
+        <FileSpreadsheet size={size} />
+      );
 
     case "archive":
-      return <FileArchive size={size} />;
+      return (
+        <FileArchive size={size} />
+      );
 
     case "code":
       return <FileCode2 size={size} />;
@@ -358,21 +438,34 @@ function getFileIcon(file: FileItem, size = 28) {
   }
 }
 
-function isPreviewable(file: FileItem): boolean {
-  const category = getFileCategory(file);
+function isPreviewable(
+  file: FileItem
+): boolean {
+  const category =
+    getFileCategory(file);
 
-  return ["image", "video", "audio", "pdf"].includes(category);
+  return [
+    "image",
+    "video",
+    "audio",
+    "pdf",
+  ].includes(category);
 }
 
-function getInitials(name: string): string {
+function getInitials(
+  name: string
+): string {
   const clean = name.trim();
 
   if (!clean) return "F";
 
-  const words = clean.split(/\s+/);
+  const words =
+    clean.split(/\s+/);
 
   if (words.length === 1) {
-    return words[0].slice(0, 2).toUpperCase();
+    return words[0]
+      .slice(0, 2)
+      .toUpperCase();
   }
 
   return `${words[0][0]}${words[1][0]}`.toUpperCase();
@@ -387,8 +480,18 @@ export default function FilesPage() {
      DATA
   ------------------------------------------------------- */
 
-  const [files, setFiles] = useState<FileItem[]>([]);
-  const [folders, setFolders] = useState<FolderItem[]>([]);
+  const [files, setFiles] =
+    useState<FileItem[]>([]);
+
+  const [folders, setFolders] =
+    useState<FolderItem[]>([]);
+
+  /* -------------------------------------------------------
+     STARRED
+  ------------------------------------------------------- */
+
+  const [starredItems, setStarredItems] =
+    useState<string[]>([]);
 
   /* -------------------------------------------------------
      NAVIGATION
@@ -397,9 +500,13 @@ export default function FilesPage() {
   const [currentFolderId, setCurrentFolderId] =
     useState<UUID | null>(null);
 
-  const [breadcrumbs, setBreadcrumbs] = useState<
-    BreadcrumbItem[]
-  >([{ id: null, name: "My Files" }]);
+  const [breadcrumbs, setBreadcrumbs] =
+    useState<BreadcrumbItem[]>([
+      {
+        id: null,
+        name: "My Files",
+      },
+    ]);
 
   /* -------------------------------------------------------
      UI
@@ -408,7 +515,8 @@ export default function FilesPage() {
   const [viewMode, setViewMode] =
     useState<ViewMode>("grid");
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] =
+    useState("");
 
   const [sortKey, setSortKey] =
     useState<SortKey>("date");
@@ -420,8 +528,12 @@ export default function FilesPage() {
      LOADING
   ------------------------------------------------------- */
 
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] =
+    useState(true);
+
+  const [uploading, setUploading] =
+    useState(false);
+
   const [creatingFolder, setCreatingFolder] =
     useState(false);
 
@@ -435,7 +547,8 @@ export default function FilesPage() {
      ERRORS
   ------------------------------------------------------- */
 
-  const [error, setError] = useState("");
+  const [error, setError] =
+    useState("");
 
   /* -------------------------------------------------------
      MODALS
@@ -469,7 +582,8 @@ export default function FilesPage() {
   const [selectedUploadFiles, setSelectedUploadFiles] =
     useState<globalThis.File[]>([]);
 
-  const [isDragging, setIsDragging] = useState(false);
+  const [isDragging, setIsDragging] =
+    useState(false);
 
   const fileInputRef =
     useRef<HTMLInputElement | null>(null);
@@ -478,16 +592,18 @@ export default function FilesPage() {
      FOLDER
   ------------------------------------------------------- */
 
-  const [folderName, setFolderName] = useState("");
+  const [folderName, setFolderName] =
+    useState("");
 
   /* -------------------------------------------------------
      TOAST
   ------------------------------------------------------- */
 
-  const [toast, setToast] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
+  const [toast, setToast] =
+    useState<{
+      type: "success" | "error";
+      message: string;
+    } | null>(null);
 
   /* =======================================================
      TOAST
@@ -511,6 +627,110 @@ export default function FilesPage() {
   );
 
   /* =======================================================
+     LOAD STARRED ITEMS
+  ======================================================= */
+
+  useEffect(() => {
+    try {
+      const stored =
+        localStorage.getItem(
+          STARRED_STORAGE_KEY
+        );
+
+      if (!stored) return;
+
+      const parsed =
+        JSON.parse(stored);
+
+      if (Array.isArray(parsed)) {
+        setStarredItems(
+          parsed.filter(
+            (
+              item
+            ): item is string =>
+              typeof item === "string"
+          )
+        );
+      }
+    } catch (err) {
+      console.error(
+        "Unable to load starred items:",
+        err
+      );
+    }
+  }, []);
+
+  /* =======================================================
+     STAR / UNSTAR
+  ======================================================= */
+
+  const toggleStar = useCallback(
+    (
+      id: UUID,
+      type: "file" | "folder"
+    ) => {
+      const key = `${type}:${id}`;
+
+      setStarredItems(
+        (previous) => {
+          const alreadyStarred =
+            previous.includes(key);
+
+          const updated =
+            alreadyStarred
+              ? previous.filter(
+                  (item) =>
+                    item !== key
+                )
+              : [
+                  ...previous,
+                  key,
+                ];
+
+          try {
+            localStorage.setItem(
+              STARRED_STORAGE_KEY,
+              JSON.stringify(updated)
+            );
+          } catch (err) {
+            console.error(
+              "Unable to save starred item:",
+              err
+            );
+          }
+
+          showToast(
+            "success",
+            alreadyStarred
+              ? "Removed from Starred."
+              : "Added to Starred."
+          );
+
+          return updated;
+        }
+      );
+    },
+    [showToast]
+  );
+
+  /* =======================================================
+     CHECK STAR
+  ======================================================= */
+
+  const isItemStarred =
+    useCallback(
+      (
+        id: UUID,
+        type: "file" | "folder"
+      ) => {
+        return starredItems.includes(
+          `${type}:${id}`
+        );
+      },
+      [starredItems]
+    );
+
+  /* =======================================================
      AUTH CHECK
   ======================================================= */
 
@@ -521,6 +741,7 @@ export default function FilesPage() {
       setError(
         "You are not authenticated. Please login again."
       );
+
       setLoading(false);
     }
   }, []);
@@ -530,7 +751,9 @@ export default function FilesPage() {
   ======================================================= */
 
   const loadFolders = useCallback(
-    async (folderId: UUID | null) => {
+    async (
+      folderId: UUID | null
+    ) => {
       const token = getToken();
 
       if (!token) return;
@@ -547,35 +770,48 @@ export default function FilesPage() {
           );
         }
 
-        const response = await fetch(
-          url.toString(),
-          {
-            method: "GET",
-            headers: authHeaders(),
-            cache: "no-store",
-          }
-        );
+        const response =
+          await fetch(
+            url.toString(),
+            {
+              method: "GET",
+              headers: authHeaders(),
+              cache: "no-store",
+            }
+          );
 
         if (!response.ok) {
           throw new Error(
-            await parseApiError(response)
+            await parseApiError(
+              response
+            )
           );
         }
 
-        const data = await response.json();
+        const data =
+          await response.json();
 
-        const rawFolders = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.folders)
-          ? data.folders
-          : Array.isArray(data?.data)
-          ? data.data
-          : [];
+        const rawFolders =
+          Array.isArray(data)
+            ? data
+            : Array.isArray(
+                data?.folders
+              )
+            ? data.folders
+            : Array.isArray(
+                data?.data
+              )
+            ? data.data
+            : [];
 
         setFolders(
           rawFolders
             .map(normalizeFolder)
-            .filter((folder: FolderItem) => folder.id)
+            .filter(
+              (
+                folder: FolderItem
+              ) => folder.id
+            )
         );
       } catch (err) {
         console.error(
@@ -594,7 +830,9 @@ export default function FilesPage() {
   ======================================================= */
 
   const loadFiles = useCallback(
-    async (folderId: UUID | null) => {
+    async (
+      folderId: UUID | null
+    ) => {
       const token = getToken();
 
       if (!token) {
@@ -617,14 +855,15 @@ export default function FilesPage() {
           );
         }
 
-        const response = await fetch(
-          url.toString(),
-          {
-            method: "GET",
-            headers: authHeaders(),
-            cache: "no-store",
-          }
-        );
+        const response =
+          await fetch(
+            url.toString(),
+            {
+              method: "GET",
+              headers: authHeaders(),
+              cache: "no-store",
+            }
+          );
 
         if (response.status === 401) {
           throw new Error(
@@ -634,24 +873,36 @@ export default function FilesPage() {
 
         if (!response.ok) {
           throw new Error(
-            await parseApiError(response)
+            await parseApiError(
+              response
+            )
           );
         }
 
-        const data = await response.json();
+        const data =
+          await response.json();
 
-        const rawFiles = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.files)
-          ? data.files
-          : Array.isArray(data?.data)
-          ? data.data
-          : [];
+        const rawFiles =
+          Array.isArray(data)
+            ? data
+            : Array.isArray(
+                data?.files
+              )
+            ? data.files
+            : Array.isArray(
+                data?.data
+              )
+            ? data.data
+            : [];
 
         setFiles(
           rawFiles
             .map(normalizeFile)
-            .filter((file: FileItem) => file.id)
+            .filter(
+              (
+                file: FileItem
+              ) => file.id
+            )
         );
       } catch (err: any) {
         console.error(
@@ -676,19 +927,24 @@ export default function FilesPage() {
      LOAD CURRENT FOLDER
   ======================================================= */
 
-  const refreshCurrentFolder = useCallback(
-    async () => {
-      await Promise.all([
-        loadFiles(currentFolderId),
-        loadFolders(currentFolderId),
-      ]);
-    },
-    [
-      currentFolderId,
-      loadFiles,
-      loadFolders,
-    ]
-  );
+  const refreshCurrentFolder =
+    useCallback(
+      async () => {
+        await Promise.all([
+          loadFiles(
+            currentFolderId
+          ),
+          loadFolders(
+            currentFolderId
+          ),
+        ]);
+      },
+      [
+        currentFolderId,
+        loadFiles,
+        loadFolders,
+      ]
+    );
 
   /* =======================================================
      INITIAL / FOLDER LOAD
@@ -702,132 +958,160 @@ export default function FilesPage() {
      NAVIGATE INTO FOLDER
   ======================================================= */
 
-  const openFolder = useCallback(
-    async (folder: FolderItem) => {
-      setCurrentFolderId(folder.id);
+  const openFolder =
+    useCallback(
+      async (
+        folder: FolderItem
+      ) => {
+        setCurrentFolderId(
+          folder.id
+        );
 
-      setBreadcrumbs((previous) => {
-        const existingIndex =
-          previous.findIndex(
-            (item) => item.id === folder.id
-          );
+        setBreadcrumbs(
+          (previous) => {
+            const existingIndex =
+              previous.findIndex(
+                (item) =>
+                  item.id ===
+                  folder.id
+              );
 
-        if (existingIndex >= 0) {
-          return previous.slice(
-            0,
-            existingIndex + 1
-          );
-        }
+            if (
+              existingIndex >= 0
+            ) {
+              return previous.slice(
+                0,
+                existingIndex + 1
+              );
+            }
 
-        return [
-          ...previous,
-          {
-            id: folder.id,
-            name: folder.name,
-          },
-        ];
-      });
+            return [
+              ...previous,
+              {
+                id: folder.id,
+                name: folder.name,
+              },
+            ];
+          }
+        );
 
-      setSearch("");
-    },
-    []
-  );
+        setSearch("");
+      },
+      []
+    );
 
   /* =======================================================
      BREADCRUMB CLICK
   ======================================================= */
 
-  const navigateBreadcrumb = useCallback(
-    (index: number) => {
-      const item = breadcrumbs[index];
+  const navigateBreadcrumb =
+    useCallback(
+      (index: number) => {
+        const item =
+          breadcrumbs[index];
 
-      if (!item) return;
+        if (!item) return;
 
-      setBreadcrumbs(
-        breadcrumbs.slice(0, index + 1)
-      );
+        setBreadcrumbs(
+          breadcrumbs.slice(
+            0,
+            index + 1
+          )
+        );
 
-      setCurrentFolderId(item.id);
-      setSearch("");
-    },
-    [breadcrumbs]
-  );
+        setCurrentFolderId(
+          item.id
+        );
+
+        setSearch("");
+      },
+      [breadcrumbs]
+    );
 
   /* =======================================================
      CREATE FOLDER
   ======================================================= */
 
-  const createFolder = async () => {
-    const cleanName = folderName.trim();
+  const createFolder =
+    async () => {
+      const cleanName =
+        folderName.trim();
 
-    if (!cleanName) {
-      showToast(
-        "error",
-        "Please enter a folder name."
-      );
-      return;
-    }
-
-    const token = getToken();
-
-    if (!token) {
-      showToast(
-        "error",
-        "Please login again."
-      );
-      return;
-    }
-
-    setCreatingFolder(true);
-
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/folders`,
-        {
-          method: "POST",
-          headers: {
-            ...authHeaders(),
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            name: cleanName,
-            parentFolderId:
-              currentFolderId,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          await parseApiError(response)
+      if (!cleanName) {
+        showToast(
+          "error",
+          "Please enter a folder name."
         );
+        return;
       }
 
-      setFolderName("");
-      setShowFolderModal(false);
+      const token = getToken();
 
-      await loadFolders(currentFolderId);
+      if (!token) {
+        showToast(
+          "error",
+          "Please login again."
+        );
+        return;
+      }
 
-      showToast(
-        "success",
-        "Folder created successfully."
-      );
-    } catch (err: any) {
-      console.error(
-        "Create folder error:",
-        err
-      );
+      setCreatingFolder(true);
 
-      showToast(
-        "error",
-        err?.message ||
-          "Unable to create folder."
-      );
-    } finally {
-      setCreatingFolder(false);
-    }
-  };
+      try {
+        const response =
+          await fetch(
+            `${API_BASE}/api/folders`,
+            {
+              method: "POST",
+              headers: {
+                ...authHeaders(),
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                name: cleanName,
+                parentFolderId:
+                  currentFolderId,
+              }),
+            }
+          );
+
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(
+              response
+            )
+          );
+        }
+
+        setFolderName("");
+        setShowFolderModal(
+          false
+        );
+
+        await loadFolders(
+          currentFolderId
+        );
+
+        showToast(
+          "success",
+          "Folder created successfully."
+        );
+      } catch (err: any) {
+        console.error(
+          "Create folder error:",
+          err
+        );
+
+        showToast(
+          "error",
+          err?.message ||
+            "Unable to create folder."
+        );
+      } finally {
+        setCreatingFolder(false);
+      }
+    };
 
   /* =======================================================
      SELECT UPLOAD FILES
@@ -836,9 +1120,11 @@ export default function FilesPage() {
   const addUploadFiles = (
     incoming: globalThis.File[]
   ) => {
-    const validFiles = incoming.filter(
-      (file) => file.size >= 0
-    );
+    const validFiles =
+      incoming.filter(
+        (file) =>
+          file.size >= 0
+      );
 
     setSelectedUploadFiles(
       (previous) => {
@@ -847,20 +1133,28 @@ export default function FilesPage() {
           ...validFiles,
         ];
 
-        const unique = new Map<
-          string,
-          globalThis.File
-        >();
+        const unique =
+          new Map<
+            string,
+            globalThis.File
+          >();
 
         for (const file of merged) {
           const key = `${file.name}-${file.size}-${file.lastModified}`;
 
-          if (!unique.has(key)) {
-            unique.set(key, file);
+          if (
+            !unique.has(key)
+          ) {
+            unique.set(
+              key,
+              file
+            );
           }
         }
 
-        return Array.from(unique.values());
+        return Array.from(
+          unique.values()
+        );
       }
     );
   };
@@ -872,11 +1166,14 @@ export default function FilesPage() {
   const handleFileInput = (
     event: ChangeEvent<HTMLInputElement>
   ) => {
-    const incoming = Array.from(
-      event.target.files || []
-    );
+    const incoming =
+      Array.from(
+        event.target.files || []
+      );
 
-    addUploadFiles(incoming);
+    addUploadFiles(
+      incoming
+    );
 
     event.target.value = "";
   };
@@ -911,11 +1208,14 @@ export default function FilesPage() {
 
     setIsDragging(false);
 
-    const incoming = Array.from(
-      event.dataTransfer.files || []
-    );
+    const incoming =
+      Array.from(
+        event.dataTransfer.files || []
+      );
 
-    addUploadFiles(incoming);
+    addUploadFiles(
+      incoming
+    );
   };
 
   /* =======================================================
@@ -938,103 +1238,126 @@ export default function FilesPage() {
      UPLOAD FILES
   ======================================================= */
 
-  const uploadFiles = async () => {
-    if (selectedUploadFiles.length === 0) {
-      showToast(
-        "error",
-        "Please select at least one file."
-      );
-      return;
-    }
-
-    const token = getToken();
-
-    if (!token) {
-      showToast(
-        "error",
-        "Please login again."
-      );
-      return;
-    }
-
-    setUploading(true);
-
-    let successCount = 0;
-    let failedCount = 0;
-
-    try {
-      for (const uploadFile of selectedUploadFiles) {
-        try {
-          const formData = new FormData();
-
-          formData.append(
-            "file",
-            uploadFile
-          );
-
-          if (currentFolderId) {
-            formData.append(
-              "parentFolderId",
-              currentFolderId
-            );
-          }
-
-          const response = await fetch(
-            `${API_BASE}/api/files/upload`,
-            {
-              method: "POST",
-              headers: authHeaders(),
-              body: formData,
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error(
-              await parseApiError(response)
-            );
-          }
-
-          successCount++;
-        } catch (uploadError) {
-          console.error(
-            `Upload failed for ${uploadFile.name}:`,
-            uploadError
-          );
-
-          failedCount++;
-        }
-      }
-
-      setSelectedUploadFiles([]);
-      setShowUploadModal(false);
-
-      await loadFiles(currentFolderId);
-
-      if (successCount > 0 && failedCount === 0) {
-        showToast(
-          "success",
-          successCount === 1
-            ? "File uploaded successfully."
-            : `${successCount} files uploaded successfully.`
-        );
-      } else if (
-        successCount > 0 &&
-        failedCount > 0
+  const uploadFiles =
+    async () => {
+      if (
+        selectedUploadFiles.length ===
+        0
       ) {
         showToast(
           "error",
-          `${successCount} uploaded, ${failedCount} failed.`
+          "Please select at least one file."
         );
-      } else {
+        return;
+      }
+
+      const token = getToken();
+
+      if (!token) {
         showToast(
           "error",
-          "File upload failed."
+          "Please login again."
         );
+        return;
       }
-    } finally {
-      setUploading(false);
-    }
-  };
+
+      setUploading(true);
+
+      let successCount = 0;
+      let failedCount = 0;
+
+      try {
+        for (const uploadFile of selectedUploadFiles) {
+          try {
+            const formData =
+              new FormData();
+
+            formData.append(
+              "file",
+              uploadFile
+            );
+
+            if (
+              currentFolderId
+            ) {
+              formData.append(
+                "parentFolderId",
+                currentFolderId
+              );
+            }
+
+            const response =
+              await fetch(
+                `${API_BASE}/api/files/upload`,
+                {
+                  method: "POST",
+                  headers:
+                    authHeaders(),
+                  body: formData,
+                }
+              );
+
+            if (!response.ok) {
+              throw new Error(
+                await parseApiError(
+                  response
+                )
+              );
+            }
+
+            successCount++;
+          } catch (
+            uploadError
+          ) {
+            console.error(
+              `Upload failed for ${uploadFile.name}:`,
+              uploadError
+            );
+
+            failedCount++;
+          }
+        }
+
+        setSelectedUploadFiles(
+          []
+        );
+
+        setShowUploadModal(
+          false
+        );
+
+        await loadFiles(
+          currentFolderId
+        );
+
+        if (
+          successCount > 0 &&
+          failedCount === 0
+        ) {
+          showToast(
+            "success",
+            successCount === 1
+              ? "File uploaded successfully."
+              : `${successCount} files uploaded successfully.`
+          );
+        } else if (
+          successCount > 0 &&
+          failedCount > 0
+        ) {
+          showToast(
+            "error",
+            `${successCount} uploaded, ${failedCount} failed.`
+          );
+        } else {
+          showToast(
+            "error",
+            "File upload failed."
+          );
+        }
+      } finally {
+        setUploading(false);
+      }
+    };
 
   /* =======================================================
      DOWNLOAD
@@ -1056,41 +1379,57 @@ export default function FilesPage() {
       return;
     }
 
-    setDownloadingId(file.id);
+    setDownloadingId(
+      file.id
+    );
 
     try {
-      const response = await fetch(
-        `${API_BASE}/api/files/${file.id}/download`,
-        {
-          method: "GET",
-          headers: authHeaders(),
-        }
-      );
+      const response =
+        await fetch(
+          `${API_BASE}/api/files/${file.id}/download`,
+          {
+            method: "GET",
+            headers:
+              authHeaders(),
+          }
+        );
 
       if (!response.ok) {
         throw new Error(
-          await parseApiError(response)
+          await parseApiError(
+            response
+          )
         );
       }
 
-      const blob = await response.blob();
+      const blob =
+        await response.blob();
 
       const objectUrl =
-        window.URL.createObjectURL(blob);
+        window.URL.createObjectURL(
+          blob
+        );
 
       const anchor =
-        document.createElement("a");
+        document.createElement(
+          "a"
+        );
 
       anchor.href = objectUrl;
-      anchor.download = file.fileName;
+      anchor.download =
+        file.fileName;
 
-      document.body.appendChild(anchor);
+      document.body.appendChild(
+        anchor
+      );
 
       anchor.click();
 
       anchor.remove();
 
-      window.URL.revokeObjectURL(objectUrl);
+      window.URL.revokeObjectURL(
+        objectUrl
+      );
 
       showToast(
         "success",
@@ -1108,7 +1447,9 @@ export default function FilesPage() {
           "Unable to download file."
       );
     } finally {
-      setDownloadingId(null);
+      setDownloadingId(
+        null
+      );
     }
   };
 
@@ -1124,79 +1465,105 @@ export default function FilesPage() {
 
     if (deletingId) return;
 
-    setDeleteConfirmFile(file);
+    setDeleteConfirmFile(
+      file
+    );
   };
 
   /* =======================================================
      DELETE
   ======================================================= */
 
-  const deleteFile = async () => {
-    if (!deleteConfirmFile) return;
+  const deleteFile =
+    async () => {
+      if (
+        !deleteConfirmFile
+      )
+        return;
 
-    const file = deleteConfirmFile;
+      const file =
+        deleteConfirmFile;
 
-    const token = getToken();
+      const token = getToken();
 
-    if (!token) {
-      setDeleteConfirmFile(null);
-
-      showToast(
-        "error",
-        "Please login again."
-      );
-
-      return;
-    }
-
-    setDeletingId(file.id);
-
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/files/${file.id}`,
-        {
-          method: "DELETE",
-          headers: authHeaders(),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          await parseApiError(response)
+      if (!token) {
+        setDeleteConfirmFile(
+          null
         );
+
+        showToast(
+          "error",
+          "Please login again."
+        );
+
+        return;
       }
 
-      setFiles((previous) =>
-        previous.filter(
-          (item) => item.id !== file.id
-        )
+      setDeletingId(
+        file.id
       );
 
-      setDeleteConfirmFile(null);
+      try {
+        const response =
+          await fetch(
+            `${API_BASE}/api/files/${file.id}`,
+            {
+              method: "DELETE",
+              headers:
+                authHeaders(),
+            }
+          );
 
-      setSelectedFile(null);
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(
+              response
+            )
+          );
+        }
 
-      setPreviewFile(null);
+        setFiles(
+          (previous) =>
+            previous.filter(
+              (item) =>
+                item.id !==
+                file.id
+            )
+        );
 
-      showToast(
-        "success",
-        `"${file.fileName}" moved to Trash successfully.`
-      );
-    } catch (err: any) {
-      console.error(
-        "Delete error:",
-        err
-      );
+        setDeleteConfirmFile(
+          null
+        );
 
-      showToast(
-        "error",
-        err?.message ||
-          "Unable to delete file. Please try again."
-      );
-    } finally {
-      setDeletingId(null);
-    }
-  };
+        setSelectedFile(
+          null
+        );
+
+        setPreviewFile(
+          null
+        );
+
+        showToast(
+          "success",
+          `"${file.fileName}" moved to Trash successfully.`
+        );
+      } catch (err: any) {
+        console.error(
+          "Delete error:",
+          err
+        );
+
+        showToast(
+          "error",
+          err?.message ||
+            "Unable to delete file. Please try again."
+        );
+      } finally {
+        setDeletingId(
+          null
+        );
+      }
+    };
 
   /* =======================================================
      FOLDER DELETE CONFIRMATION
@@ -1208,64 +1575,103 @@ export default function FilesPage() {
   ) => {
     event?.stopPropagation();
 
-    if (deletingId || deletingFolderId) return;
+    if (
+      deletingId ||
+      deletingFolderId
+    )
+      return;
 
-    setDeleteConfirmFolder(folder);
+    setDeleteConfirmFolder(
+      folder
+    );
   };
 
   /* =======================================================
      FOLDER DELETE
   ======================================================= */
 
-  const deleteFolder = async () => {
-    if (!deleteConfirmFolder) return;
+  const deleteFolder =
+    async () => {
+      if (
+        !deleteConfirmFolder
+      )
+        return;
 
-    const folder = deleteConfirmFolder;
-    const token = getToken();
+      const folder =
+        deleteConfirmFolder;
 
-    if (!token) {
-      setDeleteConfirmFolder(null);
-      showToast("error", "Please login again.");
-      return;
-    }
+      const token = getToken();
 
-    setDeletingFolderId(folder.id);
+      if (!token) {
+        setDeleteConfirmFolder(
+          null
+        );
 
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/folders/${folder.id}`,
-        {
-          method: "DELETE",
-          headers: authHeaders(),
-        }
-      );
+        showToast(
+          "error",
+          "Please login again."
+        );
 
-      if (!response.ok) {
-        throw new Error(await parseApiError(response));
+        return;
       }
 
-      setFolders((previous) =>
-        previous.filter((item) => item.id !== folder.id)
+      setDeletingFolderId(
+        folder.id
       );
 
-      setDeleteConfirmFolder(null);
+      try {
+        const response =
+          await fetch(
+            `${API_BASE}/api/folders/${folder.id}`,
+            {
+              method: "DELETE",
+              headers:
+                authHeaders(),
+            }
+          );
 
-      showToast(
-        "success",
-        `"${folder.name}" moved to trash successfully.`
-      );
-    } catch (err: any) {
-      console.error("Folder delete error:", err);
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(
+              response
+            )
+          );
+        }
 
-      showToast(
-        "error",
-        err?.message ||
-          "Unable to delete folder. Please try again."
-      );
-    } finally {
-      setDeletingFolderId(null);
-    }
-  };
+        setFolders(
+          (previous) =>
+            previous.filter(
+              (item) =>
+                item.id !==
+                folder.id
+            )
+        );
+
+        setDeleteConfirmFolder(
+          null
+        );
+
+        showToast(
+          "success",
+          `"${folder.name}" moved to trash successfully.`
+        );
+      } catch (err: any) {
+        console.error(
+          "Folder delete error:",
+          err
+        );
+
+        showToast(
+          "error",
+          err?.message ||
+            "Unable to delete folder. Please try again."
+        );
+      } finally {
+        setDeletingFolderId(
+          null
+        );
+      }
+    };
 
   /* =======================================================
      PREVIEW
@@ -1277,7 +1683,9 @@ export default function FilesPage() {
   ) => {
     event?.stopPropagation();
 
-    if (!isPreviewable(file)) {
+    if (
+      !isPreviewable(file)
+    ) {
       setSelectedFile(file);
       return;
     }
@@ -1289,78 +1697,109 @@ export default function FilesPage() {
      FILTER + SORT
   ======================================================= */
 
-  const filteredFolders = useMemo(() => {
-    const query =
-      search.trim().toLowerCase();
+  const filteredFolders =
+    useMemo(() => {
+      const query =
+        search
+          .trim()
+          .toLowerCase();
 
-    let result = [...folders];
+      let result = [
+        ...folders,
+      ];
 
-    if (query) {
-      result = result.filter((folder) =>
-        folder.name
-          .toLowerCase()
-          .includes(query)
-      );
-    }
-
-    result.sort((a, b) =>
-      a.name.localeCompare(b.name)
-    );
-
-    return result;
-  }, [folders, search]);
-
-  const filteredFiles = useMemo(() => {
-    const query =
-      search.trim().toLowerCase();
-
-    let result = [...files];
-
-    if (query) {
-      result = result.filter((file) =>
-        file.fileName
-          .toLowerCase()
-          .includes(query)
-      );
-    }
-
-    result.sort((a, b) => {
-      let comparison = 0;
-
-      if (sortKey === "name") {
-        comparison =
-          a.fileName.localeCompare(
-            b.fileName
+      if (query) {
+        result =
+          result.filter(
+            (folder) =>
+              folder.name
+                .toLowerCase()
+                .includes(query)
           );
       }
 
-      if (sortKey === "size") {
-        comparison =
-          a.fileSize - b.fileSize;
+      result.sort(
+        (a, b) =>
+          a.name.localeCompare(
+            b.name
+          )
+      );
+
+      return result;
+    }, [folders, search]);
+
+  const filteredFiles =
+    useMemo(() => {
+      const query =
+        search
+          .trim()
+          .toLowerCase();
+
+      let result = [
+        ...files,
+      ];
+
+      if (query) {
+        result =
+          result.filter(
+            (file) =>
+              file.fileName
+                .toLowerCase()
+                .includes(query)
+          );
       }
 
-      if (sortKey === "date") {
-        comparison =
-          new Date(
-            a.createdAt
-          ).getTime() -
-          new Date(
-            b.createdAt
-          ).getTime();
-      }
+      result.sort(
+        (a, b) => {
+          let comparison =
+            0;
 
-      return sortDirection === "asc"
-        ? comparison
-        : -comparison;
-    });
+          if (
+            sortKey ===
+            "name"
+          ) {
+            comparison =
+              a.fileName.localeCompare(
+                b.fileName
+              );
+          }
 
-    return result;
-  }, [
-    files,
-    search,
-    sortKey,
-    sortDirection,
-  ]);
+          if (
+            sortKey ===
+            "size"
+          ) {
+            comparison =
+              a.fileSize -
+              b.fileSize;
+          }
+
+          if (
+            sortKey ===
+            "date"
+          ) {
+            comparison =
+              new Date(
+                a.createdAt
+              ).getTime() -
+              new Date(
+                b.createdAt
+              ).getTime();
+          }
+
+          return sortDirection ===
+            "asc"
+            ? comparison
+            : -comparison;
+        }
+      );
+
+      return result;
+    }, [
+      files,
+      search,
+      sortKey,
+      sortDirection,
+    ]);
 
   /* =======================================================
      SORT
@@ -1369,16 +1808,22 @@ export default function FilesPage() {
   const changeSort = (
     key: SortKey
   ) => {
-    if (sortKey === key) {
-      setSortDirection((previous) =>
-        previous === "asc"
-          ? "desc"
-          : "asc"
+    if (
+      sortKey === key
+    ) {
+      setSortDirection(
+        (previous) =>
+          previous ===
+          "asc"
+            ? "desc"
+            : "asc"
       );
+
       return;
     }
 
     setSortKey(key);
+
     setSortDirection(
       key === "name"
         ? "asc"
@@ -1390,14 +1835,15 @@ export default function FilesPage() {
      REFRESH
   ======================================================= */
 
-  const handleRefresh = async () => {
-    await refreshCurrentFolder();
+  const handleRefresh =
+    async () => {
+      await refreshCurrentFolder();
 
-    showToast(
-      "success",
-      "Files refreshed."
-    );
-  };
+      showToast(
+        "success",
+        "Files refreshed."
+      );
+    };
 
   /* =======================================================
      RENDER
@@ -1406,6 +1852,7 @@ export default function FilesPage() {
   return (
     <DashboardShell>
       <div className="min-h-full bg-slate-50 dark:bg-slate-950">
+
         {/* =================================================
             HEADER
         ================================================= */}
@@ -1413,6 +1860,7 @@ export default function FilesPage() {
         <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
           <div className="px-5 py-5 sm:px-8">
             <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+
               <div>
                 <div className="flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">
                   {breadcrumbs.map(
@@ -1421,7 +1869,8 @@ export default function FilesPage() {
                         key={`${item.id}-${index}`}
                         className="flex items-center"
                       >
-                        {index > 0 && (
+                        {index >
+                          0 && (
                           <ChevronRight
                             size={15}
                             className="mx-1"
@@ -1452,13 +1901,16 @@ export default function FilesPage() {
                 <div className="mt-2 flex items-center gap-3">
                   <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
                     {breadcrumbs[
-                      breadcrumbs.length - 1
-                    ]?.name || "My Files"}
+                      breadcrumbs.length -
+                        1
+                    ]?.name ||
+                      "My Files"}
                   </h1>
 
                   <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-900 dark:text-slate-400">
                     {files.length}{" "}
-                    {files.length === 1
+                    {files.length ===
+                    1
                       ? "file"
                       : "files"}
                   </span>
@@ -1471,8 +1923,11 @@ export default function FilesPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+
                 <button
-                  onClick={handleRefresh}
+                  onClick={
+                    handleRefresh
+                  }
                   disabled={loading}
                   className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
@@ -1495,7 +1950,9 @@ export default function FilesPage() {
                   }
                   className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
-                  <FolderPlus size={17} />
+                  <FolderPlus
+                    size={17}
+                  />
                   New folder
                 </button>
 
@@ -1507,7 +1964,9 @@ export default function FilesPage() {
                   }
                   className="inline-flex h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
                 >
-                  <Upload size={17} />
+                  <Upload
+                    size={17}
+                  />
                   Upload
                 </button>
               </div>
@@ -1521,6 +1980,7 @@ export default function FilesPage() {
 
         <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-col gap-3 px-5 py-4 lg:flex-row lg:items-center lg:justify-between sm:px-8">
+
             <div className="relative w-full lg:max-w-md">
               <Search
                 size={18}
@@ -1551,13 +2011,18 @@ export default function FilesPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+
               <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
+
                 <button
                   onClick={() =>
-                    changeSort("name")
+                    changeSort(
+                      "name"
+                    )
                   }
                   className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium ${
-                    sortKey === "name"
+                    sortKey ===
+                    "name"
                       ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
                       : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                   }`}
@@ -1567,69 +2032,70 @@ export default function FilesPage() {
                   />
                   Name
                   {sortKey ===
-                    "name" && (
-                    sortDirection ===
-                    "asc" ? (
-                      " ↑"
-                    ) : (
-                      " ↓"
-                    )
-                  )}
+                    "name" &&
+                    (sortDirection ===
+                    "asc"
+                      ? " ↑"
+                      : " ↓")}
                 </button>
 
                 <button
                   onClick={() =>
-                    changeSort("size")
+                    changeSort(
+                      "size"
+                    )
                   }
                   className={`hidden h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:flex ${
-                    sortKey === "size"
+                    sortKey ===
+                    "size"
                       ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
                       : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                   }`}
                 >
                   Size
                   {sortKey ===
-                    "size" && (
-                    sortDirection ===
-                    "asc" ? (
-                      " ↑"
-                    ) : (
-                      " ↓"
-                    )
-                  )}
+                    "size" &&
+                    (sortDirection ===
+                    "asc"
+                      ? " ↑"
+                      : " ↓")}
                 </button>
 
                 <button
                   onClick={() =>
-                    changeSort("date")
+                    changeSort(
+                      "date"
+                    )
                   }
                   className={`h-8 rounded-lg px-2.5 text-xs font-medium ${
-                    sortKey === "date"
+                    sortKey ===
+                    "date"
                       ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
                       : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                   }`}
                 >
                   Date
                   {sortKey ===
-                    "date" && (
-                    sortDirection ===
-                    "asc" ? (
-                      " ↑"
-                    ) : (
-                      " ↓"
-                    )
-                  )}
+                    "date" &&
+                    (sortDirection ===
+                    "asc"
+                      ? " ↑"
+                      : " ↓")}
                 </button>
               </div>
 
               <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
+
                 <button
                   onClick={() =>
-                    setViewMode("grid")
+                    setViewMode(
+                      "grid"
+                    )
                   }
                   title="Grid view"
                   className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                    viewMode === "grid"
+                    viewMode ===
+                    "grid"
                       ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
                       : "text-slate-400 hover:text-slate-900 dark:hover:text-white"
                   }`}
@@ -1641,16 +2107,21 @@ export default function FilesPage() {
 
                 <button
                   onClick={() =>
-                    setViewMode("list")
+                    setViewMode(
+                      "list"
+                    )
                   }
                   title="List view"
                   className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-                    viewMode === "list"
+                    viewMode ===
+                    "list"
                       ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
                       : "text-slate-400 hover:text-slate-900 dark:hover:text-white"
                   }`}
                 >
-                  <List size={18} />
+                  <List
+                    size={18}
+                  />
                 </button>
               </div>
             </div>
@@ -1664,6 +2135,7 @@ export default function FilesPage() {
         {error && (
           <div className="px-5 pt-5 sm:px-8">
             <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+
               <AlertCircle
                 size={19}
                 className="mt-0.5 shrink-0"
@@ -1680,7 +2152,9 @@ export default function FilesPage() {
               </div>
 
               <button
-                onClick={refreshCurrentFolder}
+                onClick={
+                  refreshCurrentFolder
+                }
                 className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold hover:bg-red-100 dark:border-red-900 dark:hover:bg-red-950"
               >
                 Retry
@@ -1694,19 +2168,26 @@ export default function FilesPage() {
         ================================================= */}
 
         <div className="px-5 py-6 sm:px-8">
+
           {loading ? (
             <LoadingState />
-          ) : filteredFolders.length === 0 &&
-            filteredFiles.length === 0 ? (
+          ) : filteredFolders.length ===
+              0 &&
+            filteredFiles.length ===
+              0 ? (
             <EmptyState
               hasSearch={Boolean(
                 search.trim()
               )}
               onUpload={() =>
-                setShowUploadModal(true)
+                setShowUploadModal(
+                  true
+                )
               }
               onCreateFolder={() =>
-                setShowFolderModal(true)
+                setShowFolderModal(
+                  true
+                )
               }
             />
           ) : (
@@ -1716,6 +2197,7 @@ export default function FilesPage() {
               {filteredFolders.length >
                 0 && (
                 <section className="mb-8">
+
                   <div className="mb-3 flex items-center justify-between">
                     <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
                       Folders
@@ -1758,6 +2240,13 @@ export default function FilesPage() {
                               deletingFolderId ===
                               folder.id
                             }
+                            onToggleStar={
+                              toggleStar
+                            }
+                            isStarred={isItemStarred(
+                              folder.id,
+                              "folder"
+                            )}
                           />
                         ) : (
                           <FolderListItem
@@ -1777,6 +2266,13 @@ export default function FilesPage() {
                               deletingFolderId ===
                               folder.id
                             }
+                            onToggleStar={
+                              toggleStar
+                            }
+                            isStarred={isItemStarred(
+                              folder.id,
+                              "folder"
+                            )}
                           />
                         )
                     )}
@@ -1789,6 +2285,7 @@ export default function FilesPage() {
               {filteredFiles.length >
                 0 && (
                 <section>
+
                   <div className="mb-3 flex items-center justify-between">
                     <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
                       Files
@@ -1805,10 +2302,13 @@ export default function FilesPage() {
                   {viewMode ===
                   "grid" ? (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+
                       {filteredFiles.map(
                         (file) => (
                           <FileCard
-                            key={file.id}
+                            key={
+                              file.id
+                            }
                             file={file}
                             onPreview={
                               openPreview
@@ -1827,12 +2327,20 @@ export default function FilesPage() {
                               deletingId ===
                               file.id
                             }
+                            onToggleStar={
+                              toggleStar
+                            }
+                            isStarred={isItemStarred(
+                              file.id,
+                              "file"
+                            )}
                           />
                         )
                       )}
                     </div>
                   ) : (
                     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+
                       <div className="hidden grid-cols-[minmax(0,1fr)_140px_160px_100px] gap-4 border-b border-slate-200 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800 md:grid">
                         <span>Name</span>
                         <span>Size</span>
@@ -1843,7 +2351,9 @@ export default function FilesPage() {
                       {filteredFiles.map(
                         (file) => (
                           <FileListItem
-                            key={file.id}
+                            key={
+                              file.id
+                            }
                             file={file}
                             onPreview={
                               openPreview
@@ -1862,6 +2372,13 @@ export default function FilesPage() {
                               deletingId ===
                               file.id
                             }
+                            onToggleStar={
+                              toggleStar
+                            }
+                            isStarred={isItemStarred(
+                              file.id,
+                              "file"
+                            )}
                           />
                         )
                       )}
@@ -1890,6 +2407,7 @@ export default function FilesPage() {
           }}
         >
           <div className="space-y-5">
+
             <div
               onDragOver={
                 handleDragOver
@@ -1897,7 +2415,9 @@ export default function FilesPage() {
               onDragLeave={
                 handleDragLeave
               }
-              onDrop={handleDrop}
+              onDrop={
+                handleDrop
+              }
               onClick={() =>
                 fileInputRef.current?.click()
               }
@@ -1923,7 +2443,9 @@ export default function FilesPage() {
               </p>
 
               <input
-                ref={fileInputRef}
+                ref={
+                  fileInputRef
+                }
                 type="file"
                 multiple
                 className="hidden"
@@ -1936,8 +2458,12 @@ export default function FilesPage() {
             {selectedUploadFiles.length >
               0 && (
               <div className="max-h-64 space-y-2 overflow-y-auto">
+
                 {selectedUploadFiles.map(
-                  (file, index) => (
+                  (
+                    file,
+                    index
+                  ) => (
                     <div
                       key={`${file.name}-${file.lastModified}-${index}`}
                       className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 dark:border-slate-800"
@@ -1971,7 +2497,9 @@ export default function FilesPage() {
                         }
                         className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-red-500 disabled:opacity-50 dark:hover:bg-slate-800"
                       >
-                        <X size={17} />
+                        <X
+                          size={17}
+                        />
                       </button>
                     </div>
                   )
@@ -1980,8 +2508,11 @@ export default function FilesPage() {
             )}
 
             <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+
               <button
-                disabled={uploading}
+                disabled={
+                  uploading
+                }
                 onClick={() => {
                   setSelectedUploadFiles(
                     []
@@ -2001,7 +2532,9 @@ export default function FilesPage() {
                   selectedUploadFiles.length ===
                     0
                 }
-                onClick={uploadFiles}
+                onClick={
+                  uploadFiles
+                }
                 className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
               >
                 {uploading && (
@@ -2039,7 +2572,9 @@ export default function FilesPage() {
         <Modal
           title="Create new folder"
           onClose={() => {
-            if (!creatingFolder) {
+            if (
+              !creatingFolder
+            ) {
               setShowFolderModal(
                 false
               );
@@ -2048,6 +2583,7 @@ export default function FilesPage() {
           }}
         >
           <div className="space-y-5">
+
             <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-4 dark:bg-slate-900">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
                 <FolderPlus
@@ -2080,13 +2616,19 @@ export default function FilesPage() {
 
               <input
                 autoFocus
-                value={folderName}
-                onChange={(event) =>
+                value={
+                  folderName
+                }
+                onChange={(
+                  event
+                ) =>
                   setFolderName(
                     event.target.value
                   )
                 }
-                onKeyDown={(event) => {
+                onKeyDown={(
+                  event
+                ) => {
                   if (
                     event.key ===
                     "Enter"
@@ -2100,6 +2642,7 @@ export default function FilesPage() {
             </div>
 
             <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+
               <button
                 disabled={
                   creatingFolder
@@ -2108,7 +2651,9 @@ export default function FilesPage() {
                   setShowFolderModal(
                     false
                   );
-                  setFolderName("");
+                  setFolderName(
+                    ""
+                  );
                 }}
                 className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
               >
@@ -2147,13 +2692,23 @@ export default function FilesPage() {
 
       {selectedFile && (
         <FileDetailsModal
-          file={selectedFile}
-          onClose={() =>
-            setSelectedFile(null)
+          file={
+            selectedFile
           }
-          onPreview={openPreview}
-          onDownload={downloadFile}
-          onDelete={requestDeleteFile}
+          onClose={() =>
+            setSelectedFile(
+              null
+            )
+          }
+          onPreview={
+            openPreview
+          }
+          onDownload={
+            downloadFile
+          }
+          onDelete={
+            requestDeleteFile
+          }
           downloading={
             downloadingId ===
             selectedFile.id
@@ -2171,9 +2726,13 @@ export default function FilesPage() {
 
       {previewFile && (
         <PreviewModal
-          file={previewFile}
+          file={
+            previewFile
+          }
           onClose={() =>
-            setPreviewFile(null)
+            setPreviewFile(
+              null
+            )
           }
           onDownload={
             downloadFile
@@ -2191,26 +2750,44 @@ export default function FilesPage() {
 
       {deleteConfirmFolder && (
         <FolderDeleteConfirmModal
-          folder={deleteConfirmFolder}
-          deleting={Boolean(deletingFolderId)}
-          onCancel={() => setDeleteConfirmFolder(null)}
-          onConfirm={deleteFolder}
+          folder={
+            deleteConfirmFolder
+          }
+          deleting={Boolean(
+            deletingFolderId
+          )}
+          onCancel={() =>
+            setDeleteConfirmFolder(
+              null
+            )
+          }
+          onConfirm={
+            deleteFolder
+          }
         />
       )}
 
       {deleteConfirmFile && (
         <DeleteConfirmModal
-          file={deleteConfirmFile}
+          file={
+            deleteConfirmFile
+          }
           deleting={
             deletingId ===
             deleteConfirmFile.id
           }
           onCancel={() => {
-            if (!deletingId) {
-              setDeleteConfirmFile(null);
+            if (
+              !deletingId
+            ) {
+              setDeleteConfirmFile(
+                null
+              );
             }
           }}
-          onConfirm={deleteFile}
+          onConfirm={
+            deleteFile
+          }
         />
       )}
 
@@ -2275,13 +2852,17 @@ function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+
         <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-950">
+
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">
             {title}
           </h2>
 
           <button
-            onClick={onClose}
+            onClick={
+              onClose
+            }
             className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-900 dark:hover:text-white"
           >
             <X size={19} />
@@ -2297,7 +2878,7 @@ function Modal({
 }
 
 /* =========================================================
-   DELETE CONFIRMATION MODAL
+   DELETE FOLDER MODAL
 ========================================================= */
 
 function FolderDeleteConfirmModal({
@@ -2314,8 +2895,14 @@ function FolderDeleteConfirmModal({
   return (
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !deleting) {
+      onMouseDown={(
+        event
+      ) => {
+        if (
+          event.target ===
+            event.currentTarget &&
+          !deleting
+        ) {
           onCancel();
         }
       }}
@@ -2326,13 +2913,17 @@ function FolderDeleteConfirmModal({
         aria-modal="true"
         aria-labelledby="delete-folder-title"
       >
+
         <div className="flex justify-center pt-7">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400">
-            <Trash2 size={25} />
+            <Trash2
+              size={25}
+            />
           </div>
         </div>
 
         <div className="px-6 pb-5 pt-5 text-center">
+
           <h2
             id="delete-folder-title"
             className="text-lg font-bold text-slate-900 dark:text-white"
@@ -2345,16 +2936,23 @@ function FolderDeleteConfirmModal({
           </p>
 
           <div className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left dark:border-slate-800 dark:bg-slate-900">
+
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
-              <FolderOpen size={21} />
+              <FolderOpen
+                size={21}
+              />
             </div>
+
             <div className="min-w-0 flex-1">
               <p
                 className="truncate text-sm font-semibold text-slate-900 dark:text-white"
-                title={folder.name}
+                title={
+                  folder.name
+                }
               >
                 {folder.name}
               </p>
+
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 Folder
               </p>
@@ -2363,28 +2961,43 @@ function FolderDeleteConfirmModal({
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900/50">
+
           <button
             type="button"
-            disabled={deleting}
-            onClick={onCancel}
+            disabled={
+              deleting
+            }
+            onClick={
+              onCancel
+            }
             className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             Cancel
           </button>
+
           <button
             type="button"
-            disabled={deleting}
-            onClick={onConfirm}
+            disabled={
+              deleting
+            }
+            onClick={
+              onConfirm
+            }
             className="inline-flex min-w-[125px] items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {deleting ? (
               <>
-                <Loader2 size={17} className="animate-spin" />
+                <Loader2
+                  size={17}
+                  className="animate-spin"
+                />
                 Moving...
               </>
             ) : (
               <>
-                <Trash2 size={17} />
+                <Trash2
+                  size={17}
+                />
                 Move to Trash
               </>
             )}
@@ -2394,6 +3007,10 @@ function FolderDeleteConfirmModal({
     </div>
   );
 }
+
+/* =========================================================
+   DELETE FILE MODAL
+========================================================= */
 
 function DeleteConfirmModal({
   file,
@@ -2409,9 +3026,12 @@ function DeleteConfirmModal({
   return (
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
-      onMouseDown={(event) => {
+      onMouseDown={(
+        event
+      ) => {
         if (
-          event.target === event.currentTarget &&
+          event.target ===
+            event.currentTarget &&
           !deleting
         ) {
           onCancel();
@@ -2424,13 +3044,17 @@ function DeleteConfirmModal({
         aria-modal="true"
         aria-labelledby="delete-file-title"
       >
+
         <div className="flex justify-center pt-7">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400">
-            <Trash2 size={25} />
+            <Trash2
+              size={25}
+            />
           </div>
         </div>
 
         <div className="px-6 pb-5 pt-5 text-center">
+
           <h2
             id="delete-file-title"
             className="text-lg font-bold text-slate-900 dark:text-white"
@@ -2444,30 +3068,43 @@ function DeleteConfirmModal({
           </p>
 
           <div className="mt-5 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left dark:border-slate-800 dark:bg-slate-900">
+
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
-              {getFileIcon(file, 21)}
+              {getFileIcon(
+                file,
+                21
+              )}
             </div>
 
             <div className="min-w-0 flex-1">
               <p
                 className="truncate text-sm font-semibold text-slate-900 dark:text-white"
-                title={file.fileName}
+                title={
+                  file.fileName
+                }
               >
                 {file.fileName}
               </p>
 
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                {formatFileSize(file.fileSize)}
+                {formatFileSize(
+                  file.fileSize
+                )}
               </p>
             </div>
           </div>
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900/50">
+
           <button
             type="button"
-            disabled={deleting}
-            onClick={onCancel}
+            disabled={
+              deleting
+            }
+            onClick={
+              onCancel
+            }
             className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             Cancel
@@ -2475,8 +3112,12 @@ function DeleteConfirmModal({
 
           <button
             type="button"
-            disabled={deleting}
-            onClick={onConfirm}
+            disabled={
+              deleting
+            }
+            onClick={
+              onConfirm
+            }
             className="inline-flex min-w-[105px] items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {deleting ? (
@@ -2489,7 +3130,9 @@ function DeleteConfirmModal({
               </>
             ) : (
               <>
-                <Trash2 size={17} />
+                <Trash2
+                  size={17}
+                />
                 Delete
               </>
             )}
@@ -2497,6 +3140,53 @@ function DeleteConfirmModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/* =========================================================
+   STAR BUTTON
+========================================================= */
+
+function StarButton({
+  isStarred,
+  onClick,
+  title = "Add to Starred",
+}: {
+  isStarred: boolean;
+  onClick: (
+    event: MouseEvent<HTMLButtonElement>
+  ) => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`shrink-0 rounded-lg p-2 transition ${
+        isStarred
+          ? "text-amber-500 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/30"
+          : "text-slate-400 hover:bg-slate-100 hover:text-amber-500 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-amber-400"
+      }`}
+      title={
+        isStarred
+          ? "Remove from Starred"
+          : title
+      }
+      aria-label={
+        isStarred
+          ? "Remove from Starred"
+          : "Add to Starred"
+      }
+    >
+      <Star
+        size={18}
+        className={
+          isStarred
+            ? "fill-current"
+            : ""
+        }
+      />
+    </button>
   );
 }
 
@@ -2509,48 +3199,102 @@ function FolderCard({
   onOpen,
   onDelete,
   deleting,
+  onToggleStar,
+  isStarred,
 }: {
   folder: FolderItem;
-  onOpen: (folder: FolderItem) => void;
-  onDelete: (folder: FolderItem, event?: MouseEvent) => void;
+  onOpen: (
+    folder: FolderItem
+  ) => void;
+  onDelete: (
+    folder: FolderItem,
+    event?: MouseEvent
+  ) => void;
   deleting: boolean;
+  onToggleStar: (
+    id: UUID,
+    type: "file" | "folder"
+  ) => void;
+  isStarred: boolean;
 }) {
   return (
     <div className="group rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700">
+
       <div className="flex items-start justify-between">
-        <button
-          type="button"
-          onClick={() => onOpen(folder)}
-          className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-          title={`Open ${folder.name}`}
-        >
-          <FolderOpen size={25} />
-        </button>
 
         <button
           type="button"
-          disabled={deleting}
-          onClick={(event) => onDelete(folder, event)}
-          className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-500 dark:hover:bg-red-950/30 dark:hover:text-red-400"
-          title="Delete folder"
-          aria-label={`Delete ${folder.name}`}
+          onClick={() =>
+            onOpen(folder)
+          }
+          className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          title={`Open ${folder.name}`}
         >
-          {deleting ? (
-            <Loader2 size={18} className="animate-spin" />
-          ) : (
-            <Trash2 size={18} />
-          )}
+          <FolderOpen
+            size={25}
+          />
         </button>
+
+        <div className="flex items-center gap-1">
+
+          <StarButton
+            isStarred={
+              isStarred
+            }
+            onClick={(
+              event
+            ) => {
+              event.stopPropagation();
+
+              onToggleStar(
+                folder.id,
+                "folder"
+              );
+            }}
+          />
+
+          <button
+            type="button"
+            disabled={
+              deleting
+            }
+            onClick={(
+              event
+            ) =>
+              onDelete(
+                folder,
+                event
+              )
+            }
+            className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-500 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+            title="Delete folder"
+            aria-label={`Delete ${folder.name}`}
+          >
+            {deleting ? (
+              <Loader2
+                size={18}
+                className="animate-spin"
+              />
+            ) : (
+              <Trash2
+                size={18}
+              />
+            )}
+          </button>
+        </div>
       </div>
 
       <button
         type="button"
-        onClick={() => onOpen(folder)}
+        onClick={() =>
+          onOpen(folder)
+        }
         className="mt-4 block w-full text-left"
       >
         <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
           {folder.name}
         </p>
+
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
           Folder
         </p>
@@ -2568,49 +3312,100 @@ function FolderListItem({
   onOpen,
   onDelete,
   deleting,
+  onToggleStar,
+  isStarred,
 }: {
   folder: FolderItem;
-  onOpen: (folder: FolderItem) => void;
-  onDelete: (folder: FolderItem, event?: MouseEvent) => void;
+  onOpen: (
+    folder: FolderItem
+  ) => void;
+  onDelete: (
+    folder: FolderItem,
+    event?: MouseEvent
+  ) => void;
   deleting: boolean;
+  onToggleStar: (
+    id: UUID,
+    type: "file" | "folder"
+  ) => void;
+  isStarred: boolean;
 }) {
   return (
     <div className="flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/70">
+
       <button
         type="button"
-        onClick={() => onOpen(folder)}
+        onClick={() =>
+          onOpen(folder)
+        }
         className="flex min-w-0 flex-1 items-center gap-4 text-left"
       >
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-          <Folder size={21} />
+          <Folder
+            size={21}
+          />
         </div>
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
             {folder.name}
           </p>
+
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Folder
           </p>
         </div>
       </button>
 
+      <StarButton
+        isStarred={
+          isStarred
+        }
+        onClick={(
+          event
+        ) => {
+          event.stopPropagation();
+
+          onToggleStar(
+            folder.id,
+            "folder"
+          );
+        }}
+      />
+
       <button
         type="button"
-        disabled={deleting}
-        onClick={(event) => onDelete(folder, event)}
+        disabled={
+          deleting
+        }
+        onClick={(
+          event
+        ) =>
+          onDelete(
+            folder,
+            event
+          )
+        }
         className="shrink-0 rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-500 dark:hover:bg-red-950/30 dark:hover:text-red-400"
         title="Delete folder"
         aria-label={`Delete ${folder.name}`}
       >
         {deleting ? (
-          <Loader2 size={18} className="animate-spin" />
+          <Loader2
+            size={18}
+            className="animate-spin"
+          />
         ) : (
-          <Trash2 size={18} />
+          <Trash2
+            size={18}
+          />
         )}
       </button>
 
-      <ChevronRight size={18} className="shrink-0 text-slate-400" />
+      <ChevronRight
+        size={18}
+        className="shrink-0 text-slate-400"
+      />
     </div>
   );
 }
@@ -2626,6 +3421,8 @@ function FileCard({
   onDelete,
   downloading,
   deleting,
+  onToggleStar,
+  isStarred,
 }: {
   file: FileItem;
   onPreview: (
@@ -2642,14 +3439,24 @@ function FileCard({
   ) => void;
   downloading: boolean;
   deleting: boolean;
+  onToggleStar: (
+    id: UUID,
+    type: "file" | "folder"
+  ) => void;
+  isStarred: boolean;
 }) {
   const category =
-    getFileCategory(file);
+    getFileCategory(
+      file
+    );
 
   return (
     <div className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
+
       <button
-        onClick={(event) =>
+        onClick={(
+          event
+        ) =>
           onPreview(
             file,
             event
@@ -2668,10 +3475,15 @@ function FileCard({
       </button>
 
       <div className="p-4">
+
         <div className="flex items-start gap-3">
+
           <div className="min-w-0 flex-1">
+
             <button
-              onClick={(event) =>
+              onClick={(
+                event
+              ) =>
                 onPreview(
                   file,
                   event
@@ -2696,17 +3508,39 @@ function FileCard({
             </p>
           </div>
 
-          <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-1 text-[10px] font-bold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-            {category}
-          </span>
+          <div className="flex shrink-0 items-center gap-1">
+
+            <StarButton
+              isStarred={
+                isStarred
+              }
+              onClick={(
+                event
+              ) => {
+                event.stopPropagation();
+
+                onToggleStar(
+                  file.id,
+                  "file"
+                );
+              }}
+            />
+
+            <span className="rounded-md bg-slate-100 px-1.5 py-1 text-[10px] font-bold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+              {category}
+            </span>
+          </div>
         </div>
 
         <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+
           {isPreviewable(
             file
           ) && (
             <button
-              onClick={(event) =>
+              onClick={(
+                event
+              ) =>
                 onPreview(
                   file,
                   event
@@ -2719,8 +3553,12 @@ function FileCard({
           )}
 
           <button
-            disabled={downloading}
-            onClick={(event) =>
+            disabled={
+              downloading
+            }
+            onClick={(
+              event
+            ) =>
               onDownload(
                 file,
                 event
@@ -2742,8 +3580,12 @@ function FileCard({
           </button>
 
           <button
-            disabled={deleting}
-            onClick={(event) =>
+            disabled={
+              deleting
+            }
+            onClick={(
+              event
+            ) =>
               onDelete(
                 file,
                 event
@@ -2780,6 +3622,8 @@ function FileListItem({
   onDelete,
   downloading,
   deleting,
+  onToggleStar,
+  isStarred,
 }: {
   file: FileItem;
   onPreview: (
@@ -2796,11 +3640,19 @@ function FileListItem({
   ) => void;
   downloading: boolean;
   deleting: boolean;
+  onToggleStar: (
+    id: UUID,
+    type: "file" | "folder"
+  ) => void;
+  isStarred: boolean;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40 md:grid-cols-[minmax(0,1fr)_140px_160px_100px] md:items-center md:gap-4 md:px-5">
+    <div className="grid grid-cols-1 gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/40 md:grid-cols-[minmax(0,1fr)_140px_160px_140px] md:items-center md:gap-4 md:px-5">
+
       <button
-        onClick={(event) =>
+        onClick={(
+          event
+        ) =>
           onPreview(
             file,
             event
@@ -2830,6 +3682,7 @@ function FileListItem({
         <span className="mr-2 text-slate-400 md:hidden">
           Size:
         </span>
+
         {formatFileSize(
           file.fileSize
         )}
@@ -2839,15 +3692,37 @@ function FileListItem({
         <span className="mr-2 text-slate-400 md:hidden">
           Modified:
         </span>
+
         {formatDate(
           file.createdAt
         )}
       </div>
 
       <div className="flex items-center gap-1 md:justify-end">
+
+        <StarButton
+          isStarred={
+            isStarred
+          }
+          onClick={(
+            event
+          ) => {
+            event.stopPropagation();
+
+            onToggleStar(
+              file.id,
+              "file"
+            );
+          }}
+        />
+
         <button
-          disabled={downloading}
-          onClick={(event) =>
+          disabled={
+            downloading
+          }
+          onClick={(
+            event
+          ) =>
             onDownload(
               file,
               event
@@ -2869,8 +3744,12 @@ function FileListItem({
         </button>
 
         <button
-          disabled={deleting}
-          onClick={(event) =>
+          disabled={
+            deleting
+          }
+          onClick={(
+            event
+          ) =>
             onDelete(
               file,
               event
@@ -2928,10 +3807,14 @@ function FileDetailsModal({
   return (
     <Modal
       title="File details"
-      onClose={onClose}
+      onClose={
+        onClose
+      }
     >
       <div className="space-y-5">
+
         <div className="flex items-center gap-4 rounded-2xl bg-slate-50 p-4 dark:bg-slate-900">
+
           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-800 dark:text-slate-300">
             {getFileIcon(
               file,
@@ -2956,6 +3839,7 @@ function FileDetailsModal({
         </div>
 
         <div className="grid grid-cols-2 gap-3">
+
           <InfoBox
             label="Size"
             value={formatFileSize(
@@ -2986,6 +3870,7 @@ function FileDetailsModal({
         </div>
 
         <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+
           {isPreviewable(
             file
           ) && (
@@ -3000,7 +3885,9 @@ function FileDetailsModal({
           )}
 
           <button
-            disabled={downloading}
+            disabled={
+              downloading
+            }
             onClick={() =>
               onDownload(file)
             }
@@ -3016,11 +3903,14 @@ function FileDetailsModal({
                 size={17}
               />
             )}
+
             Download
           </button>
 
           <button
-            disabled={deleting}
+            disabled={
+              deleting
+            }
             onClick={() =>
               onDelete(file)
             }
@@ -3036,6 +3926,7 @@ function FileDetailsModal({
                 size={17}
               />
             )}
+
             Delete
           </button>
         </div>
@@ -3057,6 +3948,7 @@ function InfoBox({
 }) {
   return (
     <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+
       <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
         {label}
       </p>
@@ -3087,7 +3979,9 @@ function PreviewModal({
   downloading: boolean;
 }) {
   const [previewUrl, setPreviewUrl] =
-    useState<string | null>(null);
+    useState<string | null>(
+      null
+    );
 
   const [loading, setLoading] =
     useState(true);
@@ -3097,71 +3991,85 @@ function PreviewModal({
 
   useEffect(() => {
     let active = true;
-    let objectUrl: string | null =
-      null;
 
-    const loadPreview = async () => {
-      const token = getToken();
+    let objectUrl:
+      | string
+      | null = null;
 
-      if (!token) {
-        if (active) {
-          setError(
-            "Please login again."
-          );
-          setLoading(false);
-        }
-        return;
-      }
+    const loadPreview =
+      async () => {
+        const token =
+          getToken();
 
-      try {
-        setLoading(true);
-        setError("");
+        if (!token) {
+          if (active) {
+            setError(
+              "Please login again."
+            );
 
-        const response = await fetch(
-          `${API_BASE}/api/files/${file.id}/preview`,
-          {
-            method: "GET",
-            headers: authHeaders(),
+            setLoading(
+              false
+            );
           }
-        );
 
-        if (!response.ok) {
-          throw new Error(
-            await parseApiError(response)
-          );
+          return;
         }
 
-        const blob =
-          await response.blob();
+        try {
+          setLoading(true);
+          setError("");
 
-        objectUrl =
-          window.URL.createObjectURL(
-            blob
+          const response =
+            await fetch(
+              `${API_BASE}/api/files/${file.id}/preview`,
+              {
+                method: "GET",
+                headers:
+                  authHeaders(),
+              }
+            );
+
+          if (!response.ok) {
+            throw new Error(
+              await parseApiError(
+                response
+              )
+            );
+          }
+
+          const blob =
+            await response.blob();
+
+          objectUrl =
+            window.URL.createObjectURL(
+              blob
+            );
+
+          if (active) {
+            setPreviewUrl(
+              objectUrl
+            );
+          }
+        } catch (err: any) {
+          console.error(
+            "Preview error:",
+            err
           );
 
-        if (active) {
-          setPreviewUrl(
-            objectUrl
-          );
+          if (active) {
+            setError(
+              err?.message ||
+                "Unable to preview this file."
+            );
+          }
+        } finally {
+          if (active) {
+            setLoading(
+              false
+            );
+          }
         }
-      } catch (err: any) {
-        console.error(
-          "Preview error:",
-          err
-        );
-
-        if (active) {
-          setError(
-            err?.message ||
-              "Unable to preview this file."
-          );
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    };
+      };
 
     loadPreview();
 
@@ -3177,12 +4085,17 @@ function PreviewModal({
   }, [file.id]);
 
   const category =
-    getFileCategory(file);
+    getFileCategory(
+      file
+    );
 
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-slate-950">
+
       <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 px-4 sm:px-6">
+
         <div className="flex min-w-0 items-center gap-3">
+
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 text-white">
             {getFileIcon(
               file,
@@ -3209,8 +4122,11 @@ function PreviewModal({
         </div>
 
         <div className="flex items-center gap-2">
+
           <button
-            disabled={downloading}
+            disabled={
+              downloading
+            }
             onClick={() =>
               onDownload(file)
             }
@@ -3226,13 +4142,16 @@ function PreviewModal({
                 size={16}
               />
             )}
+
             <span className="hidden sm:inline">
               Download
             </span>
           </button>
 
           <button
-            onClick={onClose}
+            onClick={
+              onClose
+            }
             className="rounded-xl p-2.5 text-slate-400 hover:bg-white/10 hover:text-white"
           >
             <X size={20} />
@@ -3241,8 +4160,10 @@ function PreviewModal({
       </div>
 
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4 sm:p-8">
+
         {loading ? (
           <div className="text-center text-white">
+
             <Loader2
               size={35}
               className="mx-auto animate-spin text-slate-400"
@@ -3254,6 +4175,7 @@ function PreviewModal({
           </div>
         ) : error ? (
           <div className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
+
             <AlertCircle
               size={30}
               className="mx-auto text-red-400"
@@ -3269,10 +4191,13 @@ function PreviewModal({
           </div>
         ) : previewUrl ? (
           <div className="flex h-full w-full items-center justify-center">
+
             {category ===
               "image" && (
               <img
-                src={previewUrl}
+                src={
+                  previewUrl
+                }
                 alt={
                   file.fileName
                 }
@@ -3283,7 +4208,9 @@ function PreviewModal({
             {category ===
               "video" && (
               <video
-                src={previewUrl}
+                src={
+                  previewUrl
+                }
                 controls
                 playsInline
                 className="max-h-full max-w-full rounded-xl shadow-2xl"
@@ -3293,6 +4220,7 @@ function PreviewModal({
             {category ===
               "audio" && (
               <div className="w-full max-w-xl rounded-3xl bg-white p-8 text-center shadow-2xl">
+
                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
                   <FileAudio
                     size={36}
@@ -3304,7 +4232,9 @@ function PreviewModal({
                 </p>
 
                 <audio
-                  src={previewUrl}
+                  src={
+                    previewUrl
+                  }
                   controls
                   className="mt-6 w-full"
                 />
@@ -3314,7 +4244,9 @@ function PreviewModal({
             {category ===
               "pdf" && (
               <iframe
-                src={previewUrl}
+                src={
+                  previewUrl
+                }
                 title={
                   file.fileName
                 }
@@ -3335,24 +4267,28 @@ function PreviewModal({
 function LoadingState() {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+
       {Array.from({
         length: 8,
-      }).map((_, index) => (
-        <div
-          key={index}
-          className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
-        >
-          <div className="h-40 animate-pulse bg-slate-100 dark:bg-slate-800" />
+      }).map(
+        (_, index) => (
+          <div
+            key={index}
+            className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+          >
+            <div className="h-40 animate-pulse bg-slate-100 dark:bg-slate-800" />
 
-          <div className="space-y-3 p-4">
-            <div className="h-4 w-3/4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+            <div className="space-y-3 p-4">
 
-            <div className="h-3 w-1/2 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+              <div className="h-4 w-3/4 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
 
-            <div className="h-8 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+              <div className="h-3 w-1/2 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+
+              <div className="h-8 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      )}
     </div>
   );
 }
@@ -3372,10 +4308,15 @@ function EmptyState({
 }) {
   return (
     <div className="flex min-h-[55vh] items-center justify-center">
+
       <div className="max-w-md text-center">
+
         <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-white text-slate-400 shadow-sm ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
+
           {hasSearch ? (
-            <Search size={31} />
+            <Search
+              size={31}
+            />
           ) : (
             <FolderOpen
               size={31}
@@ -3397,6 +4338,7 @@ function EmptyState({
 
         {!hasSearch && (
           <div className="mt-5 flex justify-center gap-2">
+
             <button
               onClick={
                 onCreateFolder
@@ -3410,7 +4352,9 @@ function EmptyState({
             </button>
 
             <button
-              onClick={onUpload}
+              onClick={
+                onUpload
+              }
               className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
             >
               <Upload
