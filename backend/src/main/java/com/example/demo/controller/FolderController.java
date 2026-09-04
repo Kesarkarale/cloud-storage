@@ -1,34 +1,29 @@
 package com.example.demo.controller;
 
-import com.example.demo.model.File;
+import com.example.demo.model.Folder;
 import com.example.demo.model.User;
-import com.example.demo.service.FileService;
+import com.example.demo.service.FolderService;
 
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
-
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-
 import org.springframework.security.core.Authentication;
-
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/files")
-public class FileController {
+@RequestMapping("/api/folders")
+public class FolderController {
 
-    private final FileService fileService;
+    private final FolderService folderService;
 
-    public FileController(FileService fileService) {
-        this.fileService = fileService;
+    public FolderController(FolderService folderService) {
+        this.folderService = folderService;
     }
+
+    // =========================
+    // GET CURRENT USER ID
+    // =========================
 
     private UUID getCurrentUserId(
             Authentication authentication
@@ -58,37 +53,12 @@ public class FileController {
     }
 
     // =========================
-    // UPLOAD
+    // CREATE FOLDER
     // =========================
 
-    @PostMapping("/upload")
-    public ResponseEntity<File> uploadFile(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(required = false) UUID parentFolderId,
-            Authentication authentication
-    ) {
-
-        UUID userId =
-                getCurrentUserId(authentication);
-
-        File uploadedFile =
-                fileService.uploadFile(
-                        file,
-                        userId,
-                        parentFolderId
-                );
-
-        return ResponseEntity.ok(
-                uploadedFile
-        );
-    }
-
-    // =========================
-    // GET ACTIVE FILES
-    // =========================
-
-    @GetMapping
-    public ResponseEntity<List<File>> getFiles(
+    @PostMapping
+    public ResponseEntity<Folder> createFolder(
+            @RequestParam String name,
             @RequestParam(required = false)
             UUID parentFolderId,
             Authentication authentication
@@ -97,233 +67,122 @@ public class FileController {
         UUID userId =
                 getCurrentUserId(authentication);
 
-        return ResponseEntity.ok(
-                fileService.getFiles(
+        Folder folder =
+                folderService.createFolder(
+                        name,
+                        parentFolderId,
+                        userId
+                );
+
+        return ResponseEntity.ok(folder);
+    }
+
+    // =========================
+    // GET FOLDERS
+    // =========================
+
+    @GetMapping
+    public ResponseEntity<List<Folder>> getFolders(
+            @RequestParam(required = false)
+            UUID parentFolderId,
+            Authentication authentication
+    ) {
+
+        UUID userId =
+                getCurrentUserId(authentication);
+
+        List<Folder> folders =
+                folderService.getFolders(
                         userId,
                         parentFolderId
-                )
-        );
+                );
+
+        return ResponseEntity.ok(folders);
     }
 
     // =========================
-    // GET STARRED FILES
+    // MOVE FOLDER TO TRASH
     // =========================
 
-    @GetMapping("/starred")
-    public ResponseEntity<List<File>> getStarredFiles(
+    @DeleteMapping("/{folderId}")
+    public ResponseEntity<String> deleteFolder(
+            @PathVariable UUID folderId,
             Authentication authentication
     ) {
 
         UUID userId =
                 getCurrentUserId(authentication);
 
-        return ResponseEntity.ok(
-                fileService.getStarredFiles(userId)
-        );
-    }
-
-    // =========================
-    // STAR FILE
-    // =========================
-
-    @PostMapping("/{fileId}/star")
-    public ResponseEntity<File> starFile(
-            @PathVariable UUID fileId,
-            Authentication authentication
-    ) {
-
-        UUID userId =
-                getCurrentUserId(authentication);
-
-        File file =
-                fileService.starFile(
-                        fileId,
-                        userId
-                );
-
-        return ResponseEntity.ok(file);
-    }
-
-    // =========================
-    // UNSTAR FILE
-    // =========================
-
-    @DeleteMapping("/{fileId}/star")
-    public ResponseEntity<File> unstarFile(
-            @PathVariable UUID fileId,
-            Authentication authentication
-    ) {
-
-        UUID userId =
-                getCurrentUserId(authentication);
-
-        File file =
-                fileService.unstarFile(
-                        fileId,
-                        userId
-                );
-
-        return ResponseEntity.ok(file);
-    }
-
-    // =========================
-    // TOGGLE STAR
-    // =========================
-
-    @PatchMapping("/{fileId}/star")
-    public ResponseEntity<File> toggleStar(
-            @PathVariable UUID fileId,
-            Authentication authentication
-    ) {
-
-        UUID userId =
-                getCurrentUserId(authentication);
-
-        File file =
-                fileService.toggleStar(
-                        fileId,
-                        userId
-                );
-
-        return ResponseEntity.ok(file);
-    }
-
-    // =========================
-    // DOWNLOAD
-    // =========================
-
-    @GetMapping("/{fileId}/download")
-    public ResponseEntity<Resource> downloadFile(
-            @PathVariable UUID fileId,
-            Authentication authentication
-    ) {
-
-        UUID userId =
-                getCurrentUserId(authentication);
-
-        File file =
-                fileService.getFile(
-                        fileId,
-                        userId
-                );
-
-        try {
-
-            Resource resource =
-                    new UrlResource(
-                            Paths.get(
-                                    file.getFilePath()
-                            ).toUri()
-                    );
-
-            if (!resource.exists()) {
-
-                throw new RuntimeException(
-                        "Physical file not found"
-                );
-            }
-
-            return ResponseEntity.ok()
-                    .contentType(
-                            MediaType.parseMediaType(
-                                    file.getFileType()
-                            )
-                    )
-                    .header(
-                            HttpHeaders.CONTENT_DISPOSITION,
-                            "attachment; filename=\"" +
-                                    file.getFileName() +
-                                    "\""
-                    )
-                    .body(resource);
-
-        } catch (Exception e) {
-
-            throw new RuntimeException(
-                    "Could not download file",
-                    e
-            );
-        }
-    }
-
-    // =========================
-    // PREVIEW
-    // =========================
-
-    @GetMapping("/{fileId}/preview")
-    public ResponseEntity<Resource> previewFile(
-            @PathVariable UUID fileId,
-            Authentication authentication
-    ) {
-
-        UUID userId =
-                getCurrentUserId(authentication);
-
-        File file =
-                fileService.getFile(
-                        fileId,
-                        userId
-                );
-
-        try {
-
-            Resource resource =
-                    new UrlResource(
-                            Paths.get(
-                                    file.getFilePath()
-                            ).toUri()
-                    );
-
-            if (!resource.exists()) {
-
-                throw new RuntimeException(
-                        "Physical file not found"
-                );
-            }
-
-            return ResponseEntity.ok()
-                    .contentType(
-                            MediaType.parseMediaType(
-                                    file.getFileType()
-                            )
-                    )
-                    .header(
-                            HttpHeaders.CONTENT_DISPOSITION,
-                            "inline; filename=\"" +
-                                    file.getFileName() +
-                                    "\""
-                    )
-                    .body(resource);
-
-        } catch (Exception e) {
-
-            throw new RuntimeException(
-                    "Could not preview file",
-                    e
-            );
-        }
-    }
-
-    // =========================
-    // MOVE TO TRASH
-    // =========================
-
-    @DeleteMapping("/{fileId}")
-    public ResponseEntity<String> deleteFile(
-            @PathVariable UUID fileId,
-            Authentication authentication
-    ) {
-
-        UUID userId =
-                getCurrentUserId(authentication);
-
-        fileService.deleteFile(
-                fileId,
+        folderService.deleteFolder(
+                folderId,
                 userId
         );
 
         return ResponseEntity.ok(
-                "File moved to trash successfully"
+                "Folder moved to trash successfully"
+        );
+    }
+
+    // =========================
+    // GET TRASH FOLDERS
+    // =========================
+
+    @GetMapping("/trash")
+    public ResponseEntity<List<Folder>> getTrashFolders(
+            Authentication authentication
+    ) {
+
+        UUID userId =
+                getCurrentUserId(authentication);
+
+        return ResponseEntity.ok(
+                folderService.getTrashFolders(userId)
+        );
+    }
+
+    // =========================
+    // RESTORE FOLDER
+    // =========================
+
+    @PostMapping("/{folderId}/restore")
+    public ResponseEntity<String> restoreFolder(
+            @PathVariable UUID folderId,
+            Authentication authentication
+    ) {
+
+        UUID userId =
+                getCurrentUserId(authentication);
+
+        folderService.restoreFolder(
+                folderId,
+                userId
+        );
+
+        return ResponseEntity.ok(
+                "Folder restored successfully"
+        );
+    }
+
+    // =========================
+    // PERMANENT DELETE FOLDER
+    // =========================
+
+    @DeleteMapping("/{folderId}/permanent")
+    public ResponseEntity<String> permanentlyDeleteFolder(
+            @PathVariable UUID folderId,
+            Authentication authentication
+    ) {
+
+        UUID userId =
+                getCurrentUserId(authentication);
+
+        folderService.permanentlyDeleteFolder(
+                folderId,
+                userId
+        );
+
+        return ResponseEntity.ok(
+                "Folder permanently deleted"
         );
     }
 }
