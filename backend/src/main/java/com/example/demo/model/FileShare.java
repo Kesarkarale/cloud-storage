@@ -11,7 +11,10 @@ import java.util.UUID;
         uniqueConstraints = {
                 @UniqueConstraint(
                         name = "uk_file_shared_email",
-                        columnNames = {"file_id", "shared_with_email"}
+                        columnNames = {
+                                "file_id",
+                                "shared_with_email"
+                        }
                 )
         }
 )
