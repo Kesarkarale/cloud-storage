@@ -33,7 +33,7 @@ import {
   useState,
 } from "react";
 
-import DashboardShell from "@/components/DashboardShell";
+import DashboardShell from "../components/DashboardShell";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
