@@ -22,10 +22,6 @@ public class FolderService {
         this.fileRepository = fileRepository;
     }
 
-    // =========================
-    // CREATE FOLDER
-    // =========================
-
     public Folder createFolder(
             String name,
             UUID parentFolderId,
@@ -39,24 +35,14 @@ public class FolderService {
         String cleanName = name.trim();
 
         if (parentFolderId != null) {
-
-            Folder parent =
-                    folderRepository.findById(parentFolderId)
-                            .orElseThrow(() ->
-                                    new RuntimeException(
-                                            "Parent folder not found"
-                                    )
-                            );
+            Folder parent = folderRepository.findById(parentFolderId)
+                    .orElseThrow(() ->
+                            new RuntimeException("Parent folder not found")
+                    );
 
             if (!parent.getUserId().equals(userId)) {
                 throw new RuntimeException(
                         "You are not allowed to use this folder"
-                );
-            }
-
-            if (parent.isDeleted()) {
-                throw new RuntimeException(
-                        "Cannot create folder inside a deleted folder"
                 );
             }
         }
@@ -64,13 +50,10 @@ public class FolderService {
         List<Folder> existingFolders;
 
         if (parentFolderId == null) {
-
             existingFolders =
                     folderRepository
                             .findByUserIdAndParentFolderIdIsNull(userId);
-
         } else {
-
             existingFolders =
                     folderRepository
                             .findByUserIdAndParentFolderId(
@@ -98,19 +81,8 @@ public class FolderService {
         folder.setUserId(userId);
         folder.setParentFolderId(parentFolderId);
 
-        // New folders are not starred
-        folder.setStarred(false);
-
-        // New folders are active
-        folder.setDeleted(false);
-        folder.setDeletedAt(null);
-
         return folderRepository.save(folder);
     }
-
-    // =========================
-    // GET FOLDERS
-    // =========================
 
     public List<Folder> getFolders(
             UUID userId,
@@ -118,20 +90,14 @@ public class FolderService {
     ) {
 
         if (parentFolderId == null) {
-
             return folderRepository
-                    .findByUserIdAndParentFolderIdIsNullAndDeletedFalse(
-                            userId
-                    );
+                    .findByUserIdAndParentFolderIdIsNull(userId);
         }
 
-        Folder parent =
-                folderRepository.findById(parentFolderId)
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Folder not found"
-                                )
-                        );
+        Folder parent = folderRepository.findById(parentFolderId)
+                .orElseThrow(() ->
+                        new RuntimeException("Folder not found")
+                );
 
         if (!parent.getUserId().equals(userId)) {
             throw new RuntimeException(
@@ -139,114 +105,12 @@ public class FolderService {
             );
         }
 
-        if (parent.isDeleted()) {
-            throw new RuntimeException(
-                    "Folder is in trash"
-            );
-        }
-
         return folderRepository
-                .findByUserIdAndParentFolderIdAndDeletedFalse(
+                .findByUserIdAndParentFolderId(
                         userId,
                         parentFolderId
                 );
     }
-
-    // =========================
-    // GET STARRED FOLDERS
-    // =========================
-
-    public List<Folder> getStarredFolders(
-            UUID userId
-    ) {
-
-        return folderRepository
-                .findByUserIdAndStarredTrueAndDeletedFalse(
-                        userId
-                );
-    }
-
-    // =========================
-    // STAR FOLDER
-    // =========================
-
-    public Folder starFolder(
-            UUID folderId,
-            UUID userId
-    ) {
-
-        Folder folder =
-                folderRepository
-                        .findByIdAndUserIdAndDeletedFalse(
-                                folderId,
-                                userId
-                        )
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Folder not found"
-                                )
-                        );
-
-        folder.setStarred(true);
-
-        return folderRepository.save(folder);
-    }
-
-    // =========================
-    // UNSTAR FOLDER
-    // =========================
-
-    public Folder unstarFolder(
-            UUID folderId,
-            UUID userId
-    ) {
-
-        Folder folder =
-                folderRepository
-                        .findByIdAndUserIdAndDeletedFalse(
-                                folderId,
-                                userId
-                        )
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Folder not found"
-                                )
-                        );
-
-        folder.setStarred(false);
-
-        return folderRepository.save(folder);
-    }
-
-    // =========================
-    // TOGGLE STAR
-    // =========================
-
-    public Folder toggleStar(
-            UUID folderId,
-            UUID userId
-    ) {
-
-        Folder folder =
-                folderRepository
-                        .findByIdAndUserIdAndDeletedFalse(
-                                folderId,
-                                userId
-                        )
-                        .orElseThrow(() ->
-                                new RuntimeException(
-                                        "Folder not found"
-                                )
-                        );
-
-        folder.setStarred(!folder.isStarred());
-
-        return folderRepository.save(folder);
-    }
-
-    // =========================
-    // DELETE FOLDER
-    // =========================
 
     public void deleteFolder(
             UUID folderId,
@@ -267,15 +131,8 @@ public class FolderService {
             );
         }
 
-        deleteFolderRecursively(
-                folderId,
-                userId
-        );
+        deleteFolderRecursively(folderId, userId);
     }
-
-    // =========================
-    // RECURSIVE DELETE
-    // =========================
 
     private void deleteFolderRecursively(
             UUID folderId,
@@ -290,7 +147,6 @@ public class FolderService {
                         );
 
         for (Folder child : children) {
-
             deleteFolderRecursively(
                     child.getId(),
                     userId
@@ -307,13 +163,11 @@ public class FolderService {
         for (com.example.demo.model.File file : files) {
 
             try {
-
                 java.nio.file.Files.deleteIfExists(
                         java.nio.file.Paths.get(
                                 file.getFilePath()
                         )
                 );
-
             } catch (Exception ignored) {
             }
 
