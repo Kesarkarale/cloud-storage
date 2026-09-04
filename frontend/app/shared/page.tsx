@@ -2,7 +2,6 @@
 
 import {
   Check,
-  ChevronDown,
   Download,
   File,
   FileArchive,
@@ -44,17 +43,13 @@ type Permission = "VIEWER" | "EDITOR";
 type SharedFile = {
   id: string;
   fileId: string;
-
   name: string;
   type: string;
   size: number;
-
   owner: string;
   ownerEmail: string;
-
   permission: Permission;
   sharedDate: string;
-
   status: string;
 };
 
@@ -63,17 +58,13 @@ type ShareTab = "ALL" | "BY_ME" | "WITH_ME";
 type ApiShareResponse = {
   id?: string;
   fileId?: string;
-
   name?: string;
   type?: string;
   size?: number;
-
   owner?: string;
   ownerEmail?: string;
-
   permission?: string;
   sharedDate?: string;
-
   status?: string;
 };
 
@@ -95,6 +86,10 @@ type DetailsModalProps = {
   ) => void;
 };
 
+/* =========================================================
+   API
+========================================================= */
+
 async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -107,10 +102,7 @@ async function apiRequest<T>(
   const headers = new Headers(options.headers);
 
   if (!headers.has("Content-Type") && options.body) {
-    headers.set(
-      "Content-Type",
-      "application/json"
-    );
+    headers.set("Content-Type", "application/json");
   }
 
   if (token) {
@@ -137,10 +129,21 @@ async function apiRequest<T>(
 
       if (typeof data === "string") {
         message = data;
-      } else if (data?.message) {
-        message = data.message;
-      } else if (data?.error) {
-        message = data.error;
+      } else if (
+        data &&
+        typeof data === "object"
+      ) {
+        const errorData =
+          data as {
+            message?: string;
+            error?: string;
+          };
+
+        if (errorData.message) {
+          message = errorData.message;
+        } else if (errorData.error) {
+          message = errorData.error;
+        }
       }
     } catch {
       try {
@@ -172,6 +175,10 @@ async function apiRequest<T>(
 
   return (await response.text()) as T;
 }
+
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function normalizeSharedFile(
   item: ApiShareResponse
@@ -206,8 +213,9 @@ function normalizeSharedFile(
       "",
 
     permission:
-      String(item.permission || "VIEWER")
-        .toUpperCase() === "EDITOR"
+      String(
+        item.permission || "VIEWER"
+      ).toUpperCase() === "EDITOR"
         ? "EDITOR"
         : "VIEWER",
 
@@ -423,9 +431,13 @@ function ShareModal({
     }
   }, [open]);
 
-  if (!open || !file) {
+  if (!open || file === null) {
     return null;
   }
+
+  // Fix: keep a non-null reference
+  // for closures and JSX.
+  const selectedFile = file;
 
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>
@@ -445,9 +457,7 @@ function ShareModal({
       return;
     }
 
-    if (
-      !cleanEmail.includes("@")
-    ) {
+    if (!cleanEmail.includes("@")) {
       setError(
         "Please enter a valid email address."
       );
@@ -462,7 +472,7 @@ function ShareModal({
 
       params.set(
         "fileId",
-        file.fileId
+        selectedFile.fileId
       );
 
       params.set(
@@ -507,7 +517,6 @@ function ShareModal({
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
       <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-900">
 
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5 dark:border-slate-800">
           <div>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
@@ -515,7 +524,7 @@ function ShareModal({
             </h2>
 
             <p className="mt-1 max-w-[300px] truncate text-sm text-slate-500 dark:text-slate-400">
-              {file.name}
+              {selectedFile.name}
             </p>
           </div>
 
@@ -532,27 +541,27 @@ function ShareModal({
           onSubmit={handleSubmit}
           className="p-6"
         >
-          {/* File */}
           <div className="mb-5 flex items-center gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm dark:bg-slate-700 dark:text-slate-200">
               {getFileIcon(
-                file.type,
+                selectedFile.type,
                 "h-5 w-5"
               )}
             </div>
 
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
-                {file.name}
+                {selectedFile.name}
               </p>
 
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {formatFileSize(file.size)}
+                {formatFileSize(
+                  selectedFile.size
+                )}
               </p>
             </div>
           </div>
 
-          {/* Email */}
           <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
             Email address
           </label>
@@ -572,7 +581,6 @@ function ShareModal({
             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-500 focus:ring-2 focus:ring-slate-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500 dark:focus:border-slate-500 dark:focus:ring-slate-800"
           />
 
-          {/* Permission */}
           <div className="mt-5">
             <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">
               Permission
@@ -637,21 +645,18 @@ function ShareModal({
             </div>
           </div>
 
-          {/* Error */}
           {error && (
             <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
               {error}
             </div>
           )}
 
-          {/* Success */}
           {success && (
             <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-600 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-400">
               {success}
             </div>
           )}
 
-          {/* Buttons */}
           <div className="mt-6 flex justify-end gap-3">
             <button
               type="button"
@@ -699,9 +704,12 @@ function FileDetailsModal({
   const [downloading, setDownloading] =
     useState(false);
 
-  if (!open || !file) {
+  if (!open || file === null) {
     return null;
   }
+
+  // Fix: keep a non-null reference.
+  const selectedFile = file;
 
   async function handleDownload() {
     try {
@@ -714,7 +722,7 @@ function FileDetailsModal({
 
       const response =
         await fetch(
-          `${API_BASE}/api/files/${file.fileId}/download`,
+          `${API_BASE}/api/files/${selectedFile.fileId}/download`,
           {
             headers: token
               ? {
@@ -742,9 +750,13 @@ function FileDetailsModal({
         document.createElement("a");
 
       anchor.href = url;
-      anchor.download = file.name;
+      anchor.download =
+        selectedFile.name;
 
-      document.body.appendChild(anchor);
+      document.body.appendChild(
+        anchor
+      );
+
       anchor.click();
       anchor.remove();
 
@@ -766,7 +778,8 @@ function FileDetailsModal({
     permission: Permission
   ) {
     if (
-      permission === file.permission
+      permission ===
+      selectedFile.permission
     ) {
       return;
     }
@@ -783,14 +796,14 @@ function FileDetailsModal({
       );
 
       await apiRequest(
-        `/api/shares/${file.id}/permission?${params.toString()}`,
+        `/api/shares/${selectedFile.id}/permission?${params.toString()}`,
         {
           method: "PUT",
         }
       );
 
       onPermissionChange(
-        file,
+        selectedFile,
         permission
       );
     } catch (error) {
@@ -829,27 +842,27 @@ function FileDetailsModal({
         </div>
 
         <div className="p-6">
-          {/* File */}
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
               {getFileIcon(
-                file.type,
+                selectedFile.type,
                 "h-7 w-7"
               )}
             </div>
 
             <div className="min-w-0">
               <h3 className="truncate text-base font-semibold text-slate-900 dark:text-white">
-                {file.name}
+                {selectedFile.name}
               </h3>
 
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                {formatFileSize(file.size)}
+                {formatFileSize(
+                  selectedFile.size
+                )}
               </p>
             </div>
           </div>
 
-          {/* Details */}
           <div className="mt-6 divide-y divide-slate-100 rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
             <div className="flex items-center justify-between gap-4 px-4 py-3">
               <span className="text-sm text-slate-500 dark:text-slate-400">
@@ -858,11 +871,11 @@ function FileDetailsModal({
 
               <div className="text-right">
                 <p className="text-sm font-medium text-slate-900 dark:text-white">
-                  {file.owner}
+                  {selectedFile.owner}
                 </p>
 
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {file.ownerEmail}
+                  {selectedFile.ownerEmail}
                 </p>
               </div>
             </div>
@@ -874,7 +887,7 @@ function FileDetailsModal({
 
               <span className="text-sm font-medium text-slate-900 dark:text-white">
                 {formatDate(
-                  file.sharedDate
+                  selectedFile.sharedDate
                 )}
               </span>
             </div>
@@ -893,14 +906,16 @@ function FileDetailsModal({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  disabled={changingPermission}
+                  disabled={
+                    changingPermission
+                  }
                   onClick={() =>
                     handlePermission(
                       "VIEWER"
                     )
                   }
                   className={`rounded-lg border px-3 py-2 text-sm transition ${
-                    file.permission ===
+                    selectedFile.permission ===
                     "VIEWER"
                       ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900"
                       : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300"
@@ -911,14 +926,16 @@ function FileDetailsModal({
 
                 <button
                   type="button"
-                  disabled={changingPermission}
+                  disabled={
+                    changingPermission
+                  }
                   onClick={() =>
                     handlePermission(
                       "EDITOR"
                     )
                   }
                   className={`rounded-lg border px-3 py-2 text-sm transition ${
-                    file.permission ===
+                    selectedFile.permission ===
                     "EDITOR"
                       ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900"
                       : "border-slate-200 text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:text-slate-300"
@@ -930,7 +947,6 @@ function FileDetailsModal({
             </div>
           </div>
 
-          {/* Actions */}
           <div className="mt-6 grid grid-cols-2 gap-3">
             <button
               type="button"
@@ -952,7 +968,7 @@ function FileDetailsModal({
             <button
               type="button"
               onClick={() =>
-                onRemove(file)
+                onRemove(selectedFile)
               }
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 px-4 py-3 text-sm font-medium text-red-600 transition hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
             >
@@ -1003,37 +1019,22 @@ export default function SharedPage() {
   const [removingId, setRemovingId] =
     useState<string | null>(null);
 
+  /* =========================================================
+     LOAD SHARED FILES
+  ========================================================= */
+
   const loadFiles = useCallback(
     async () => {
       try {
         setLoading(true);
         setError("");
 
-        let endpoint =
-          "/api/shares";
-
-        if (activeTab === "BY_ME") {
-          endpoint =
-            "/api/shares/by-me";
-        }
-
-        if (activeTab === "WITH_ME") {
-          endpoint =
-            "/api/shares/with-me";
-        }
-
-        let data:
-          | ApiShareResponse[]
-          | {
-              content?: ApiShareResponse[];
-              items?: ApiShareResponse[];
-              data?: ApiShareResponse[];
-            };
+        let raw: ApiShareResponse[] =
+          [];
 
         /*
-         * /api/shares is not defined in the
-         * backend controller above, so ALL
-         * combines both endpoints.
+         * ALL
+         * Combine shared by me + shared with me.
          */
         if (activeTab === "ALL") {
           const [
@@ -1045,6 +1046,7 @@ export default function SharedPage() {
             >(
               "/api/shares/by-me"
             ),
+
             apiRequest<
               ApiShareResponse[]
             >(
@@ -1056,11 +1058,15 @@ export default function SharedPage() {
             ...(Array.isArray(byMe)
               ? byMe
               : []),
+
             ...(Array.isArray(withMe)
               ? withMe
               : []),
           ];
 
+          /*
+           * Remove duplicate share IDs.
+           */
           const unique =
             new Map<
               string,
@@ -1083,40 +1089,48 @@ export default function SharedPage() {
             }
           );
 
-          data =
+          raw =
             Array.from(
               unique.values()
             );
-        } else {
-          data =
-            await apiRequest<
-              ApiShareResponse[]
-            >(endpoint);
         }
 
-        let raw: ApiShareResponse[] =
-          [];
+        /*
+         * BY ME
+         */
+        else if (
+          activeTab === "BY_ME"
+        ) {
+          const response =
+            await apiRequest<
+              ApiShareResponse[]
+            >(
+              "/api/shares/by-me"
+            );
 
-        if (Array.isArray(data)) {
-          raw = data;
-        } else if (
-          Array.isArray(
-            data?.content
+          raw = Array.isArray(
+            response
           )
-        ) {
-          raw = data.content;
-        } else if (
-          Array.isArray(
-            data?.items
+            ? response
+            : [];
+        }
+
+        /*
+         * WITH ME
+         */
+        else {
+          const response =
+            await apiRequest<
+              ApiShareResponse[]
+            >(
+              "/api/shares/with-me"
+            );
+
+          raw = Array.isArray(
+            response
           )
-        ) {
-          raw = data.items;
-        } else if (
-          Array.isArray(
-            data?.data
-          )
-        ) {
-          raw = data.data;
+            ? response
+            : [];
         }
 
         const normalized =
@@ -1151,6 +1165,10 @@ export default function SharedPage() {
     loadFiles();
   }, [loadFiles]);
 
+  /* =========================================================
+     CLOSE MENUS
+  ========================================================= */
+
   useEffect(() => {
     function handleClick() {
       setMenuFileId(null);
@@ -1168,6 +1186,10 @@ export default function SharedPage() {
       );
     };
   }, []);
+
+  /* =========================================================
+     SEARCH
+  ========================================================= */
 
   const filteredFiles =
     useMemo(() => {
@@ -1194,6 +1216,10 @@ export default function SharedPage() {
       );
     }, [files, search]);
 
+  /* =========================================================
+     REMOVE SHARE
+  ========================================================= */
+
   const handleRemoveShare =
     useCallback(
       async (file: SharedFile) => {
@@ -1207,9 +1233,7 @@ export default function SharedPage() {
         }
 
         try {
-          setRemovingId(
-            file.id
-          );
+          setRemovingId(file.id);
 
           await apiRequest(
             `/api/shares/${file.id}`,
@@ -1229,9 +1253,7 @@ export default function SharedPage() {
             detailsFile?.id ===
             file.id
           ) {
-            setDetailsFile(
-              null
-            );
+            setDetailsFile(null);
           }
         } catch (err) {
           alert(
@@ -1245,6 +1267,10 @@ export default function SharedPage() {
       },
       [detailsFile]
     );
+
+  /* =========================================================
+     PERMISSION CHANGE
+  ========================================================= */
 
   const handlePermissionChange =
     useCallback(
@@ -1277,15 +1303,17 @@ export default function SharedPage() {
       []
     );
 
+  /* =========================================================
+     UI
+  ========================================================= */
+
   return (
     <DashboardShell>
       <div className="min-h-full bg-slate-50 px-4 py-6 dark:bg-slate-950 sm:px-6 lg:px-8">
 
         <div className="mx-auto max-w-7xl">
 
-          {/* =========================================
-              HEADER
-          ========================================= */}
+          {/* HEADER */}
 
           <div className="mb-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1323,21 +1351,18 @@ export default function SharedPage() {
             </div>
           </div>
 
-          {/* =========================================
-              TABS + SEARCH
-          ========================================= */}
+          {/* TABS + SEARCH */}
 
           <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
 
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 
               <div className="flex w-full overflow-x-auto rounded-xl bg-slate-100 p-1 dark:bg-slate-800 lg:w-auto">
+
                 <button
                   type="button"
                   onClick={() =>
-                    setActiveTab(
-                      "ALL"
-                    )
+                    setActiveTab("ALL")
                   }
                   className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition ${
                     activeTab === "ALL"
@@ -1356,8 +1381,7 @@ export default function SharedPage() {
                     )
                   }
                   className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition ${
-                    activeTab ===
-                    "BY_ME"
+                    activeTab === "BY_ME"
                       ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white"
                       : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                   }`}
@@ -1373,8 +1397,7 @@ export default function SharedPage() {
                     )
                   }
                   className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition ${
-                    activeTab ===
-                    "WITH_ME"
+                    activeTab === "WITH_ME"
                       ? "bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-white"
                       : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                   }`}
@@ -1384,6 +1407,7 @@ export default function SharedPage() {
               </div>
 
               <div className="flex w-full gap-2 lg:w-auto">
+
                 <div className="relative flex-1 lg:w-80">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
@@ -1393,8 +1417,7 @@ export default function SharedPage() {
                       event
                     ) =>
                       setSearch(
-                        event.target
-                          .value
+                        event.target.value
                       )
                     }
                     placeholder="Search shared files..."
@@ -1403,6 +1426,7 @@ export default function SharedPage() {
                 </div>
 
                 <div className="hidden items-center gap-1 rounded-xl border border-slate-200 p-1 dark:border-slate-700 sm:flex">
+
                   <button
                     type="button"
                     onClick={() =>
@@ -1411,8 +1435,7 @@ export default function SharedPage() {
                       )
                     }
                     className={`rounded-lg p-2 ${
-                      viewMode ===
-                      "grid"
+                      viewMode === "grid"
                         ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
                         : "text-slate-400"
                     }`}
@@ -1429,8 +1452,7 @@ export default function SharedPage() {
                       )
                     }
                     className={`rounded-lg p-2 ${
-                      viewMode ===
-                      "list"
+                      viewMode === "list"
                         ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
                         : "text-slate-400"
                     }`}
@@ -1438,17 +1460,17 @@ export default function SharedPage() {
                   >
                     <List className="h-4 w-4" />
                   </button>
+
                 </div>
               </div>
             </div>
           </div>
 
-          {/* =========================================
-              ERROR
-          ========================================= */}
+          {/* ERROR */}
 
           {error && (
             <div className="mb-6 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/50 dark:bg-red-950/30">
+
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-red-700 dark:text-red-400">
                   Unable to load shared files
@@ -1469,12 +1491,11 @@ export default function SharedPage() {
             </div>
           )}
 
-          {/* =========================================
-              LOADING
-          ========================================= */}
+          {/* LOADING */}
 
           {loading ? (
             <div className="flex min-h-[360px] items-center justify-center rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+
               <div className="text-center">
                 <Loader2 className="mx-auto h-8 w-8 animate-spin text-slate-400" />
 
@@ -1482,14 +1503,14 @@ export default function SharedPage() {
                   Loading shared files...
                 </p>
               </div>
+
             </div>
-          ) : filteredFiles.length ===
-            0 ? (
-            /* =========================================
-               EMPTY
-            ========================================= */
+          ) : filteredFiles.length === 0 ? (
+
+            /* EMPTY */
 
             <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900">
+
               <div className="max-w-sm px-6 text-center">
 
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
@@ -1514,21 +1535,23 @@ export default function SharedPage() {
                     ? "Files shared with your account will appear here."
                     : "Files you share with other users will appear here."}
                 </p>
+
               </div>
             </div>
-          ) : viewMode ===
-            "grid" ? (
-            /* =========================================
-               GRID
-            ========================================= */
+
+          ) : viewMode === "grid" ? (
+
+            /* GRID */
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+
               {filteredFiles.map(
                 (file) => (
                   <div
                     key={file.id}
                     className="group relative rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
                   >
+
                     <div className="flex items-start justify-between gap-3">
 
                       <button
@@ -1540,6 +1563,7 @@ export default function SharedPage() {
                         }
                         className="flex min-w-0 flex-1 items-center gap-3 text-left"
                       >
+
                         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
                           {getFileIcon(
                             file.type,
@@ -1558,9 +1582,11 @@ export default function SharedPage() {
                             )}
                           </p>
                         </div>
+
                       </button>
 
                       <div className="relative">
+
                         <button
                           type="button"
                           onClick={(
@@ -1590,6 +1616,7 @@ export default function SharedPage() {
                             }
                             className="absolute right-0 top-10 z-20 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900"
                           >
+
                             <button
                               type="button"
                               onClick={() => {
@@ -1632,6 +1659,7 @@ export default function SharedPage() {
                                 setMenuFileId(
                                   null
                                 );
+
                                 handleRemoveShare(
                                   file
                                 );
@@ -1647,18 +1675,20 @@ export default function SharedPage() {
 
                               Remove share
                             </button>
+
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Owner */}
                     <div className="mt-5 flex items-center gap-3">
+
                       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                         <User className="h-4 w-4" />
                       </div>
 
                       <div className="min-w-0">
+
                         <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
                           {file.owner}
                         </p>
@@ -1666,11 +1696,12 @@ export default function SharedPage() {
                         <p className="truncate text-xs text-slate-500 dark:text-slate-400">
                           {file.ownerEmail}
                         </p>
+
                       </div>
                     </div>
 
-                    {/* Footer */}
                     <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
+
                       <div>
                         <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                           {permissionLabel(
@@ -1684,23 +1715,29 @@ export default function SharedPage() {
                           file.sharedDate
                         )}
                       </span>
+
                     </div>
+
                   </div>
                 )
               )}
+
             </div>
+
           ) : (
-            /* =========================================
-               LIST
-            ========================================= */
+
+            /* LIST */
 
             <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+
               <div className="hidden grid-cols-[minmax(260px,1.8fr)_1fr_130px_130px_50px] gap-4 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-400 md:grid">
+
                 <span>File</span>
                 <span>Owner</span>
                 <span>Permission</span>
                 <span>Shared</span>
                 <span />
+
               </div>
 
               {filteredFiles.map(
@@ -1709,7 +1746,7 @@ export default function SharedPage() {
                     key={file.id}
                     className="grid gap-4 border-b border-slate-100 px-5 py-4 last:border-b-0 dark:border-slate-800 md:grid-cols-[minmax(260px,1.8fr)_1fr_130px_130px_50px] md:items-center"
                   >
-                    {/* File */}
+
                     <button
                       type="button"
                       onClick={() =>
@@ -1719,6 +1756,7 @@ export default function SharedPage() {
                       }
                       className="flex min-w-0 items-center gap-3 text-left"
                     >
+
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200">
                         {getFileIcon(
                           file.type,
@@ -1727,6 +1765,7 @@ export default function SharedPage() {
                       </div>
 
                       <div className="min-w-0">
+
                         <p className="truncate text-sm font-medium text-slate-900 dark:text-white">
                           {file.name}
                         </p>
@@ -1736,11 +1775,13 @@ export default function SharedPage() {
                             file.size
                           )}
                         </p>
+
                       </div>
+
                     </button>
 
-                    {/* Owner */}
                     <div className="min-w-0">
+
                       <p className="truncate text-sm font-medium text-slate-700 dark:text-slate-200">
                         {file.owner}
                       </p>
@@ -1748,9 +1789,9 @@ export default function SharedPage() {
                       <p className="truncate text-xs text-slate-500 dark:text-slate-400">
                         {file.ownerEmail}
                       </p>
+
                     </div>
 
-                    {/* Permission */}
                     <div>
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                         {permissionLabel(
@@ -1759,15 +1800,14 @@ export default function SharedPage() {
                       </span>
                     </div>
 
-                    {/* Date */}
                     <div className="text-sm text-slate-500 dark:text-slate-400">
                       {formatDate(
                         file.sharedDate
                       )}
                     </div>
 
-                    {/* Menu */}
                     <div className="relative">
+
                       <button
                         type="button"
                         onClick={(
@@ -1797,12 +1837,14 @@ export default function SharedPage() {
                           }
                           className="absolute right-0 top-10 z-20 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl dark:border-slate-700 dark:bg-slate-900"
                         >
+
                           <button
                             type="button"
                             onClick={() => {
                               setShareFile(
                                 file
                               );
+
                               setMenuFileId(
                                 null
                               );
@@ -1819,6 +1861,7 @@ export default function SharedPage() {
                               setDetailsFile(
                                 file
                               );
+
                               setMenuFileId(
                                 null
                               );
@@ -1839,6 +1882,7 @@ export default function SharedPage() {
                               setMenuFileId(
                                 null
                               );
+
                               handleRemoveShare(
                                 file
                               );
@@ -1854,37 +1898,45 @@ export default function SharedPage() {
 
                             Remove share
                           </button>
+
                         </div>
                       )}
+
                     </div>
+
                   </div>
                 )
               )}
+
             </div>
           )}
 
-          {/* Count */}
+          {/* COUNT */}
+
           {!loading &&
-            filteredFiles.length >
-              0 && (
+            filteredFiles.length > 0 && (
               <div className="mt-5 text-sm text-slate-500 dark:text-slate-400">
+
                 Showing{" "}
+
                 <span className="font-medium text-slate-700 dark:text-slate-200">
                   {filteredFiles.length}
-                </span>{" "}
-                shared{" "}
+                </span>
+
+                {" "}shared{" "}
+
                 {filteredFiles.length ===
                 1
                   ? "file"
                   : "files"}
+
               </div>
             )}
+
         </div>
       </div>
 
-      {/* =========================================
-          SHARE MODAL
-      ========================================= */}
+      {/* SHARE MODAL */}
 
       <ShareModal
         open={
@@ -1897,9 +1949,7 @@ export default function SharedPage() {
         onSuccess={loadFiles}
       />
 
-      {/* =========================================
-          DETAILS MODAL
-      ========================================= */}
+      {/* DETAILS MODAL */}
 
       <FileDetailsModal
         open={
@@ -1916,6 +1966,7 @@ export default function SharedPage() {
           handlePermissionChange
         }
       />
+
     </DashboardShell>
   );
 }
