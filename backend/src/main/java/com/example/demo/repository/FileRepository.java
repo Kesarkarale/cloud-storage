@@ -39,4 +39,17 @@ public interface FileRepository extends JpaRepository<File, UUID> {
             UUID fileId,
             UUID userId
     );
+
+    // =========================
+    // STARRED / FAVOURITE FILES
+    // =========================
+
+    List<File> findByUserIdAndStarredTrueAndDeletedFalse(
+            UUID userId
+    );
+
+    java.util.Optional<File> findByIdAndUserIdAndDeletedFalse(
+            UUID fileId,
+            UUID userId
+    );
 }
