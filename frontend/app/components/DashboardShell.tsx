@@ -6,6 +6,7 @@ import {
   Cloud,
   LayoutDashboard,
   FolderOpen,
+  Star,
   Share2,
   Clock3,
   Trash2,
@@ -338,6 +339,11 @@ export default function DashboardShell({
       href: "/files",
       icon: FolderOpen,
     },
+    {
+    name: "My Files",
+    href: "/files",
+    icon: FolderOpen,
+  },
     {
       name: "Shared Files",
       href: "/shared",
