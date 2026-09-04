@@ -106,6 +106,89 @@ public class FileController {
     }
 
     // =========================
+    // GET STARRED FILES
+    // =========================
+
+    @GetMapping("/starred")
+    public ResponseEntity<List<File>> getStarredFiles(
+            Authentication authentication
+    ) {
+
+        UUID userId =
+                getCurrentUserId(authentication);
+
+        return ResponseEntity.ok(
+                fileService.getStarredFiles(userId)
+        );
+    }
+
+    // =========================
+    // STAR FILE
+    // =========================
+
+    @PostMapping("/{fileId}/star")
+    public ResponseEntity<File> starFile(
+            @PathVariable UUID fileId,
+            Authentication authentication
+    ) {
+
+        UUID userId =
+                getCurrentUserId(authentication);
+
+        File file =
+                fileService.starFile(
+                        fileId,
+                        userId
+                );
+
+        return ResponseEntity.ok(file);
+    }
+
+    // =========================
+    // UNSTAR FILE
+    // =========================
+
+    @DeleteMapping("/{fileId}/star")
+    public ResponseEntity<File> unstarFile(
+            @PathVariable UUID fileId,
+            Authentication authentication
+    ) {
+
+        UUID userId =
+                getCurrentUserId(authentication);
+
+        File file =
+                fileService.unstarFile(
+                        fileId,
+                        userId
+                );
+
+        return ResponseEntity.ok(file);
+    }
+
+    // =========================
+    // TOGGLE STAR
+    // =========================
+
+    @PatchMapping("/{fileId}/star")
+    public ResponseEntity<File> toggleStar(
+            @PathVariable UUID fileId,
+            Authentication authentication
+    ) {
+
+        UUID userId =
+                getCurrentUserId(authentication);
+
+        File file =
+                fileService.toggleStar(
+                        fileId,
+                        userId
+                );
+
+        return ResponseEntity.ok(file);
+    }
+
+    // =========================
     // DOWNLOAD
     // =========================
 
