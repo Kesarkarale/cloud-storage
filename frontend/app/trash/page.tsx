@@ -218,33 +218,59 @@ function formatFileSize(
   )} ${units[safeIndex]}`;
 }
 
+/* =========================================================
+   FILE / FOLDER TYPE DETECTION
+   ========================================================= */
 function getFileType(
   item: BackendTrashItem
 ): TrashType {
-  if (
+  /*
+   * Folder object from backend does not necessarily contain
+   * folder=true / isFolder=true.
+   *
+   * Folder has:
+   * - name
+   * - userId / parentFolderId / createdAt
+   * - no fileName
+   * - no fileType
+   * - no fileSize
+   *
+   * So detect that case as well.
+   */
+  const isFolder =
     item.folder === true ||
-    item.isFolder === true
-  ) {
+    item.isFolder === true ||
+    (
+      !!item.name &&
+      !item.fileName &&
+      !item.filename &&
+      !item.fileType &&
+      !item.mimeType &&
+      !item.contentType &&
+      item.size === undefined &&
+      item.fileSize === undefined
+    );
+
+  if (isFolder) {
     return "folder";
   }
 
-  const mime =
-    (
-      item.fileType ||
-      item.mimeType ||
-      item.contentType ||
-      item.type ||
-      ""
-    ).toLowerCase();
+  const mime = (
+    item.fileType ||
+    item.mimeType ||
+    item.contentType ||
+    item.type ||
+    ""
+  ).toLowerCase();
 
-  const name =
-    (
-      item.fileName ||
-      item.filename ||
-      item.name ||
-      ""
-    ).toLowerCase();
+  const name = (
+    item.fileName ||
+    item.filename ||
+    item.name ||
+    ""
+  ).toLowerCase();
 
+  /* PDF */
   if (
     mime.includes("pdf") ||
     name.endsWith(".pdf")
@@ -252,6 +278,7 @@ function getFileType(
     return "pdf";
   }
 
+  /* IMAGE */
   if (
     mime.startsWith("image/") ||
     /\.(jpg|jpeg|png|gif|webp|svg|bmp|ico|avif|heic|heif)$/i.test(
@@ -261,6 +288,7 @@ function getFileType(
     return "image";
   }
 
+  /* ZIP / ARCHIVE */
   if (
     mime.includes("zip") ||
     mime.includes("compressed") ||
@@ -269,6 +297,7 @@ function getFileType(
     return "zip";
   }
 
+  /* DOCUMENT */
   if (
     mime.includes("word") ||
     mime.includes("document") ||
@@ -644,7 +673,7 @@ export default function TrashPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to restore file"
+          : "Failed to restore item"
       );
     } finally {
       setActionLoading(false);
@@ -692,7 +721,7 @@ export default function TrashPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to permanently delete file"
+          : "Failed to permanently delete item"
       );
     } finally {
       setActionLoading(false);
@@ -746,7 +775,7 @@ export default function TrashPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to restore selected files"
+          : "Failed to restore selected items"
       );
     } finally {
       setActionLoading(false);
@@ -800,7 +829,7 @@ export default function TrashPage() {
       setError(
         err instanceof Error
           ? err.message
-          : "Failed to permanently delete selected files"
+          : "Failed to permanently delete selected items"
       );
     } finally {
       setActionLoading(false);
@@ -1171,7 +1200,7 @@ export default function TrashPage() {
               </h2>
 
               <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                Files you delete will appear here.
+                Files and folders you delete will appear here.
                 You can restore them or permanently
                 delete them from this page.
               </p>
@@ -1242,8 +1271,8 @@ export default function TrashPage() {
                         }`}
                         aria-label={
                           selected
-                            ? "Unselect file"
-                            : "Select file"
+                            ? "Unselect item"
+                            : "Select item"
                         }
                       >
                         <Check size={12} />
@@ -1722,7 +1751,12 @@ export default function TrashPage() {
 
                     {modalType ===
                     "restore"
-                      ? "Restore file?"
+                      ? `Restore ${
+                          modalItem?.type ===
+                          "folder"
+                            ? "folder"
+                            : "file"
+                        }?`
                       : modalType ===
                         "empty"
                       ? "Empty Trash?"
@@ -1736,14 +1770,14 @@ export default function TrashPage() {
                     "restore"
                       ? `“${
                           modalItem?.name ||
-                          "This file"
+                          "This item"
                         }” will be moved back to My Files.`
                       : modalType ===
                         "empty"
-                      ? "All files currently in Trash will be permanently deleted. This action cannot be undone."
+                      ? "All files and folders currently in Trash will be permanently deleted. This action cannot be undone."
                       : modalItem
                       ? `“${modalItem.name}” will be permanently deleted. This action cannot be undone.`
-                      : `${selectedCount} selected files will be permanently deleted. This action cannot be undone.`}
+                      : `${selectedCount} selected items will be permanently deleted. This action cannot be undone.`}
 
                   </p>
 
@@ -1870,3 +1904,4 @@ export default function TrashPage() {
     </DashboardShell>
   );
 }
+
