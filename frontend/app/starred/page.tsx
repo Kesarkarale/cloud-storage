@@ -1,8 +1,9 @@
 "use client";
 
 import {
+  AlertCircle,
   ArrowDownAZ,
-  ArrowUpAZ,
+  CalendarDays,
   Download,
   File as FileIcon,
   FileArchive,
@@ -11,18 +12,20 @@ import {
   FileImage,
   FileSpreadsheet,
   FileText,
+  FileVideo,
+  Folder,
+  FolderOpen,
   Grid2X2,
   List,
   Loader2,
-  MoreHorizontal,
   RefreshCw,
   Search,
   Star,
+  Trash2,
   X,
 } from "lucide-react";
 
 import {
-  ChangeEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -31,33 +34,60 @@ import {
 
 import DashboardShell from "@/app/components/DashboardShell";
 
+/* =========================================================
+   TYPES
+========================================================= */
+
+type UUID = string;
+
+type ItemType = "file" | "folder";
+
 type ViewMode = "grid" | "list";
+
+type SortKey = "name" | "date" | "size";
+
 type SortDirection = "asc" | "desc";
 
-interface StarredFile {
-  id: string;
-
-  name?: string;
-  fileName?: string;
-  originalFileName?: string;
-  filename?: string;
-
-  size?: number;
-  fileSize?: number;
-
-  contentType?: string;
-  mimeType?: string;
-  type?: string;
-
-  url?: string;
-  fileUrl?: string;
-  downloadUrl?: string;
-
-  createdAt?: string;
-  updatedAt?: string;
-
-  starred?: boolean;
+interface FileItem {
+  id: UUID;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  filePath?: string;
+  userId?: UUID;
+  parentFolderId?: UUID | null;
+  createdAt: string;
 }
+
+interface FolderItem {
+  id: UUID;
+  name: string;
+  folderName?: string;
+  userId?: UUID;
+  parentFolderId?: UUID | null;
+  createdAt?: string;
+}
+
+interface StarredItem {
+  id: UUID;
+  type: ItemType;
+  name: string;
+  size?: number;
+  fileType?: string;
+  createdAt?: string;
+  parentFolderId?: UUID | null;
+  file?: FileItem;
+  folder?: FolderItem;
+}
+
+interface ToastState {
+  type: "success" | "error";
+  message: string;
+}
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
@@ -67,10 +97,10 @@ const STARRED_STORAGE_KEY =
   "cloudstorage-starred-items";
 
 /* =========================================================
-   AUTH TOKEN
+   AUTH
 ========================================================= */
 
-function getAuthToken(): string | null {
+function getToken(): string | null {
   if (typeof window === "undefined") {
     return null;
   }
@@ -87,7 +117,7 @@ function getAuthToken(): string | null {
   for (const key of possibleKeys) {
     const value = localStorage.getItem(key);
 
-    if (value) {
+    if (value && value.trim()) {
       return value;
     }
   }
@@ -95,164 +125,307 @@ function getAuthToken(): string | null {
   return null;
 }
 
-/* =========================================================
-   AUTH HEADERS
-========================================================= */
-
-function getAuthHeaders(): Record<string, string> {
-  const token = getAuthToken();
+function authHeaders(
+  extra?: HeadersInit
+): HeadersInit {
+  const token = getToken();
 
   return {
-    Authorization: token
-      ? token.startsWith("Bearer ")
-        ? token
-        : `Bearer ${token}`
-      : "",
-    "Content-Type": "application/json",
+    ...(token
+      ? {
+          Authorization: token.startsWith("Bearer ")
+            ? token
+            : `Bearer ${token}`,
+        }
+      : {}),
+    ...extra,
   };
 }
 
 /* =========================================================
-   GET FILE NAME
+   API ERROR
 ========================================================= */
 
-function getFileName(
-  file: StarredFile
+async function parseApiError(
+  response: Response
+): Promise<string> {
+  try {
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+
+      return (
+        data?.message ||
+        data?.error ||
+        data?.detail ||
+        `Request failed (${response.status})`
+      );
+    }
+
+    const text = await response.text();
+
+    if (text) {
+      return text;
+    }
+  } catch {
+    // Ignore parsing errors.
+  }
+
+  return `Request failed (${response.status})`;
+}
+
+/* =========================================================
+   NORMALIZERS
+========================================================= */
+
+function normalizeFile(
+  value: any
+): FileItem {
+  return {
+    id: String(value?.id ?? ""),
+    fileName:
+      value?.fileName ??
+      value?.filename ??
+      value?.name ??
+      "Unnamed file",
+
+    fileType:
+      value?.fileType ??
+      value?.contentType ??
+      value?.mimeType ??
+      "application/octet-stream",
+
+    fileSize: Number(
+      value?.fileSize ??
+        value?.size ??
+        0
+    ),
+
+    filePath: value?.filePath,
+
+    userId: value?.userId,
+
+    parentFolderId:
+      value?.parentFolderId ??
+      value?.parent_folder_id ??
+      null,
+
+    createdAt:
+      value?.createdAt ??
+      value?.created_at ??
+      new Date().toISOString(),
+  };
+}
+
+function normalizeFolder(
+  value: any
+): FolderItem {
+  return {
+    id: String(value?.id ?? ""),
+
+    name:
+      value?.name ??
+      value?.folderName ??
+      value?.folder_name ??
+      "Untitled folder",
+
+    folderName:
+      value?.folderName,
+
+    userId:
+      value?.userId,
+
+    parentFolderId:
+      value?.parentFolderId ??
+      value?.parent_folder_id ??
+      null,
+
+    createdAt:
+      value?.createdAt ??
+      value?.created_at,
+  };
+}
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function formatFileSize(
+  bytes: number
 ): string {
-  return (
-    file.name ||
-    file.fileName ||
-    file.originalFileName ||
-    file.filename ||
-    "Untitled file"
+  if (
+    !Number.isFinite(bytes) ||
+    bytes <= 0
+  ) {
+    return "0 B";
+  }
+
+  const units = [
+    "B",
+    "KB",
+    "MB",
+    "GB",
+    "TB",
+  ];
+
+  const index = Math.min(
+    Math.floor(
+      Math.log(bytes) /
+        Math.log(1024)
+    ),
+    units.length - 1
   );
+
+  const size =
+    bytes /
+    Math.pow(1024, index);
+
+  return `${size.toFixed(
+    index === 0
+      ? 0
+      : size >= 10
+      ? 1
+      : 2
+  )} ${units[index]}`;
 }
 
-/* =========================================================
-   GET MIME TYPE
-========================================================= */
-
-function getMimeType(
-  file: StarredFile
+function formatDate(
+  value?: string
 ): string {
-  return (
-    file.contentType ||
-    file.mimeType ||
-    file.type ||
-    ""
-  ).toLowerCase();
-}
+  if (!value) {
+    return "—";
+  }
 
-/* =========================================================
-   GET FILE EXTENSION
-========================================================= */
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }
+  ).format(date);
+}
 
 function getExtension(
-  file: StarredFile
+  fileName: string
 ): string {
-  const name = getFileName(file);
+  const parts =
+    fileName.split(".");
 
-  const lastDot =
-    name.lastIndexOf(".");
-
-  if (lastDot === -1) {
+  if (parts.length < 2) {
     return "";
   }
 
-  return name
-    .substring(lastDot + 1)
-    .toLowerCase();
+  return (
+    parts.pop()?.toLowerCase() ||
+    ""
+  );
 }
 
-/* =========================================================
-   GET FILE CATEGORY
-========================================================= */
-
 function getFileCategory(
-  file: StarredFile
-):
-  | "image"
-  | "pdf"
-  | "document"
-  | "spreadsheet"
-  | "archive"
-  | "audio"
-  | "code"
-  | "other" {
-  const mime = getMimeType(file);
-  const extension = getExtension(file);
+  file: FileItem
+): string {
+  const type =
+    file.fileType?.toLowerCase() ||
+    "";
 
-  if (mime.startsWith("image/")) {
+  const ext = getExtension(
+    file.fileName
+  );
+
+  if (type.startsWith("image/")) {
     return "image";
   }
 
   if (
-    mime.includes("pdf") ||
-    extension === "pdf"
-  ) {
-    return "pdf";
-  }
-
-  if (
-    mime.includes("spreadsheet") ||
-    mime.includes("excel") ||
+    type.startsWith("video/") ||
     [
-      "xls",
-      "xlsx",
-      "csv",
-      "ods",
-    ].includes(extension)
+      "mp4",
+      "webm",
+      "mov",
+      "mkv",
+      "avi",
+    ].includes(ext)
   ) {
-    return "spreadsheet";
+    return "video";
   }
 
   if (
-    mime.includes("word") ||
-    mime.includes("document") ||
-    [
-      "doc",
-      "docx",
-      "txt",
-      "rtf",
-    ].includes(extension)
-  ) {
-    return "document";
-  }
-
-  if (
-    mime.includes("zip") ||
-    mime.includes("rar") ||
-    mime.includes("7z") ||
-    [
-      "zip",
-      "rar",
-      "7z",
-      "tar",
-      "gz",
-    ].includes(extension)
-  ) {
-    return "archive";
-  }
-
-  if (
-    mime.startsWith("audio/") ||
+    type.startsWith("audio/") ||
     [
       "mp3",
       "wav",
       "ogg",
       "m4a",
       "aac",
-    ].includes(extension)
+      "flac",
+    ].includes(ext)
   ) {
     return "audio";
   }
 
   if (
-    mime.includes("javascript") ||
-    mime.includes("typescript") ||
-    mime.includes("json") ||
-    mime.includes("html") ||
-    mime.includes("css") ||
+    type === "application/pdf" ||
+    ext === "pdf"
+  ) {
+    return "pdf";
+  }
+
+  if (
+    type.includes("spreadsheet") ||
+    type.includes("excel") ||
+    [
+      "xls",
+      "xlsx",
+      "csv",
+    ].includes(ext)
+  ) {
+    return "spreadsheet";
+  }
+
+  if (
+    type.includes("zip") ||
+    type.includes("rar") ||
+    type.includes("7z") ||
+    [
+      "zip",
+      "rar",
+      "7z",
+      "tar",
+      "gz",
+    ].includes(ext)
+  ) {
+    return "archive";
+  }
+
+  if (
+    type.includes("text") ||
+    type.includes("word") ||
+    type.includes("document") ||
+    [
+      "txt",
+      "doc",
+      "docx",
+      "rtf",
+    ].includes(ext)
+  ) {
+    return "document";
+  }
+
+  if (
+    type.includes("javascript") ||
+    type.includes("typescript") ||
+    type.includes("json") ||
+    type.includes("html") ||
+    type.includes("css") ||
     [
       "js",
       "jsx",
@@ -261,11 +434,7 @@ function getFileCategory(
       "json",
       "html",
       "css",
-      "java",
-      "py",
-      "cpp",
-      "c",
-    ].includes(extension)
+    ].includes(ext)
   ) {
     return "code";
   }
@@ -273,368 +442,90 @@ function getFileCategory(
   return "other";
 }
 
-/* =========================================================
-   FORMAT FILE SIZE
-========================================================= */
-
-function formatFileSize(
-  bytes?: number
-): string {
-  const size = bytes ?? 0;
-
-  if (!size || size < 1) {
-    return "0 KB";
-  }
-
-  if (size < 1024) {
-    return `${size} B`;
-  }
-
-  if (size < 1024 * 1024) {
-    return `${(
-      size / 1024
-    ).toFixed(1)} KB`;
-  }
-
-  if (
-    size <
-    1024 * 1024 * 1024
-  ) {
-    return `${(
-      size /
-      (1024 * 1024)
-    ).toFixed(1)} MB`;
-  }
-
-  return `${(
-    size /
-    (1024 * 1024 * 1024)
-  ).toFixed(1)} GB`;
-}
-
-/* =========================================================
-   GET FILE SIZE
-========================================================= */
-
-function getFileSize(
-  file: StarredFile
-): number {
-  return Number(
-    file.size ??
-      file.fileSize ??
-      0
-  );
-}
-
-/* =========================================================
-   FORMAT DATE
-========================================================= */
-
-function formatDate(
-  date?: string
-): string {
-  if (!date) {
-    return "Unknown date";
-  }
-
-  const parsed = new Date(date);
-
-  if (
-    Number.isNaN(
-      parsed.getTime()
-    )
-  ) {
-    return "Unknown date";
-  }
-
-  return parsed.toLocaleDateString(
-    undefined,
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }
-  );
-}
-
-/* =========================================================
-   FILE ICON
-========================================================= */
-
-function FileTypeIcon({
-  file,
-  className = "h-6 w-6",
-}: {
-  file: StarredFile;
-  className?: string;
-}) {
-  const category =
-    getFileCategory(file);
-
-  if (category === "image") {
-    return (
-      <FileImage
-        className={className}
-      />
-    );
-  }
-
-  if (
-    category ===
-    "spreadsheet"
-  ) {
-    return (
-      <FileSpreadsheet
-        className={className}
-      />
-    );
-  }
-
-  if (
-    category === "archive"
-  ) {
-    return (
-      <FileArchive
-        className={className}
-      />
-    );
-  }
-
-  if (category === "audio") {
-    return (
-      <FileAudio
-        className={className}
-      />
-    );
-  }
-
-  if (category === "code") {
-    return (
-      <FileCode2
-        className={className}
-      />
-    );
-  }
-
-  if (
-    category ===
-      "document" ||
-    category === "pdf"
-  ) {
-    return (
-      <FileText
-        className={className}
-      />
-    );
-  }
-
-  return (
-    <FileIcon
-      className={className}
-    />
-  );
-}
-
-/* =========================================================
-   FILE ICON BACKGROUND
-========================================================= */
-
-function getIconClasses(
-  file: StarredFile
-): string {
-  const category =
-    getFileCategory(file);
-
-  if (category === "image") {
-    return "bg-purple-100 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400";
-  }
-
-  if (category === "pdf") {
-    return "bg-red-100 text-red-600 dark:bg-red-500/10 dark:text-red-400";
-  }
-
-  if (
-    category ===
-    "spreadsheet"
-  ) {
-    return "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400";
-  }
-
-  if (
-    category === "archive"
-  ) {
-    return "bg-amber-100 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400";
-  }
-
-  if (category === "audio") {
-    return "bg-pink-100 text-pink-600 dark:bg-pink-500/10 dark:text-pink-400";
-  }
-
-  if (category === "code") {
-    return "bg-cyan-100 text-cyan-600 dark:bg-cyan-500/10 dark:text-cyan-400";
-  }
-
-  return "bg-blue-100 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400";
-}
-
-/* =========================================================
-   DOWNLOAD FILE
-========================================================= */
-
-async function downloadFile(
-  file: StarredFile
+function getFileIcon(
+  file: FileItem,
+  size = 26
 ) {
-  const directUrl =
-    file.downloadUrl ||
-    file.fileUrl ||
-    file.url;
+  const category =
+    getFileCategory(file);
 
-  if (directUrl) {
-    try {
-      const response =
-        await fetch(
-          directUrl,
-          {
-            headers: {
-              Authorization:
-                getAuthHeaders()
-                  .Authorization ||
-                "",
-            },
-          }
-        );
-
-      if (!response.ok) {
-        throw new Error(
-          "Download failed"
-        );
-      }
-
-      const blob =
-        await response.blob();
-
-      const objectUrl =
-        window.URL.createObjectURL(
-          blob
-        );
-
-      const anchor =
-        document.createElement(
-          "a"
-        );
-
-      anchor.href =
-        objectUrl;
-
-      anchor.download =
-        getFileName(file);
-
-      document.body.appendChild(
-        anchor
+  switch (category) {
+    case "image":
+      return (
+        <FileImage size={size} />
       );
 
-      anchor.click();
-
-      anchor.remove();
-
-      window.URL.revokeObjectURL(
-        objectUrl
+    case "video":
+      return (
+        <FileVideo size={size} />
       );
 
-      return;
-    } catch {
-      window.open(
-        directUrl,
-        "_blank",
-        "noopener,noreferrer"
+    case "audio":
+      return (
+        <FileAudio size={size} />
       );
 
-      return;
-    }
-  }
-
-  const endpoint =
-    `${API_BASE}/api/files/${file.id}/download`;
-
-  try {
-    const response =
-      await fetch(
-        endpoint,
-        {
-          method: "GET",
-          headers:
-            getAuthHeaders(),
-        }
+    case "pdf":
+    case "document":
+      return (
+        <FileText size={size} />
       );
 
-    if (!response.ok) {
-      throw new Error(
-        "Download failed"
-      );
-    }
-
-    const blob =
-      await response.blob();
-
-    const objectUrl =
-      window.URL.createObjectURL(
-        blob
+    case "spreadsheet":
+      return (
+        <FileSpreadsheet
+          size={size}
+        />
       );
 
-    const anchor =
-      document.createElement(
-        "a"
+    case "archive":
+      return (
+        <FileArchive
+          size={size}
+        />
       );
 
-    anchor.href =
-      objectUrl;
+    case "code":
+      return (
+        <FileCode2
+          size={size}
+        />
+      );
 
-    anchor.download =
-      getFileName(file);
-
-    document.body.appendChild(
-      anchor
-    );
-
-    anchor.click();
-
-    anchor.remove();
-
-    window.URL.revokeObjectURL(
-      objectUrl
-    );
-  } catch (error) {
-    console.error(
-      "Download error:",
-      error
-    );
-
-    alert(
-      "Unable to download this file."
-    );
+    default:
+      return (
+        <FileIcon
+          size={size}
+        />
+      );
   }
 }
 
 /* =========================================================
-   SKELETON CARD
+   LOAD RESPONSE ARRAY
 ========================================================= */
 
-function SkeletonCard() {
-  return (
-    <div className="animate-pulse rounded-2xl border border-slate-200 bg-white p-5 dark:border-white/10 dark:bg-white/[0.03]">
-      <div className="mb-5 flex items-center justify-between">
-        <div className="h-12 w-12 rounded-xl bg-slate-200 dark:bg-white/10" />
+function extractArray(
+  data: any,
+  key: string
+): any[] {
+  if (Array.isArray(data)) {
+    return data;
+  }
 
-        <div className="h-8 w-8 rounded-lg bg-slate-200 dark:bg-white/10" />
-      </div>
+  if (
+    Array.isArray(data?.[key])
+  ) {
+    return data[key];
+  }
 
-      <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-white/10" />
+  if (
+    Array.isArray(data?.data)
+  ) {
+    return data.data;
+  }
 
-      <div className="mt-3 h-3 w-1/2 rounded bg-slate-100 dark:bg-white/5" />
-
-      <div className="mt-6 h-3 w-full rounded bg-slate-100 dark:bg-white/5" />
-    </div>
-  );
+  return [];
 }
 
 /* =========================================================
@@ -643,7 +534,13 @@ function SkeletonCard() {
 
 export default function StarredPage() {
   const [files, setFiles] =
-    useState<StarredFile[]>([]);
+    useState<FileItem[]>([]);
+
+  const [folders, setFolders] =
+    useState<FolderItem[]>([]);
+
+  const [starredKeys, setStarredKeys] =
+    useState<string[]>([]);
 
   const [loading, setLoading] =
     useState(true);
@@ -651,1169 +548,1632 @@ export default function StarredPage() {
   const [refreshing, setRefreshing] =
     useState(false);
 
-  const [searchQuery, setSearchQuery] =
+  const [error, setError] =
+    useState("");
+
+  const [search, setSearch] =
     useState("");
 
   const [viewMode, setViewMode] =
     useState<ViewMode>("grid");
 
+  const [sortKey, setSortKey] =
+    useState<SortKey>("date");
+
   const [sortDirection, setSortDirection] =
     useState<SortDirection>("desc");
 
-  const [activeMenu, setActiveMenu] =
+  const [downloadingId, setDownloadingId] =
     useState<string | null>(null);
 
-  const [removingId, setRemovingId] =
-    useState<string | null>(null);
-
-  const [error, setError] =
-    useState<string | null>(null);
+  const [toast, setToast] =
+    useState<ToastState | null>(null);
 
   /* =======================================================
-     FETCH STARRED FILES
+     TOAST
   ======================================================= */
 
-  const fetchStarredFiles =
+  const showToast = useCallback(
+    (
+      type: "success" | "error",
+      message: string
+    ) => {
+      setToast({
+        type,
+        message,
+      });
+
+      window.setTimeout(() => {
+        setToast(null);
+      }, 3000);
+    },
+    []
+  );
+
+  /* =======================================================
+     LOAD LOCAL STARRED ITEMS
+  ======================================================= */
+
+  const loadStarredKeys =
+    useCallback(() => {
+      try {
+        const stored =
+          localStorage.getItem(
+            STARRED_STORAGE_KEY
+          );
+
+        if (!stored) {
+          setStarredKeys([]);
+          return;
+        }
+
+        const parsed =
+          JSON.parse(stored);
+
+        if (Array.isArray(parsed)) {
+          setStarredKeys(
+            parsed.filter(
+              (
+                item
+              ): item is string =>
+                typeof item ===
+                "string"
+            )
+          );
+        } else {
+          setStarredKeys([]);
+        }
+      } catch (err) {
+        console.error(
+          "Unable to load starred items:",
+          err
+        );
+
+        setStarredKeys([]);
+      }
+    }, []);
+
+  /* =======================================================
+     FETCH FOLDER
+  ======================================================= */
+
+  const fetchFolders =
     useCallback(
       async (
-        showRefreshLoader = false
-      ) => {
-        try {
-          if (showRefreshLoader) {
-            setRefreshing(true);
-          } else {
-            setLoading(true);
-          }
-
-          setError(null);
-
-          const token =
-            getAuthToken();
-
-          if (!token) {
-            setFiles([]);
-
-            setError(
-              "Please log in to view your starred files."
-            );
-
-            return;
-          }
-
-          /*
-            Read starred items from localStorage.
-
-            Files page stores values like:
-
-            file:UUID
-            folder:UUID
-
-            We only need file:* values
-            on this page.
-          */
-
-          let starredKeys: string[] =
-            [];
-
-          try {
-            const stored =
-              localStorage.getItem(
-                STARRED_STORAGE_KEY
-              );
-
-            if (stored) {
-              const parsed =
-                JSON.parse(stored);
-
-              if (
-                Array.isArray(
-                  parsed
-                )
-              ) {
-                starredKeys =
-                  parsed.filter(
-                    (
-                      item
-                    ): item is string =>
-                      typeof item ===
-                      "string"
-                  );
-              }
-            }
-          } catch (storageError) {
-            console.error(
-              "Unable to read starred items:",
-              storageError
-            );
-          }
-
-          /*
-            Get only starred file IDs.
-          */
-
-          const starredFileIds =
-            new Set(
-              starredKeys
-                .filter((key) =>
-                  key.startsWith(
-                    "file:"
-                  )
-                )
-                .map((key) =>
-                  key.substring(
-                    "file:".length
-                  )
-                )
-            );
-
-          /*
-            No starred files.
-          */
-
-          if (
-            starredFileIds.size ===
-            0
-          ) {
-            setFiles([]);
-            return;
-          }
-
-          /*
-            Load normal files.
-
-            IMPORTANT:
-            We DO NOT call:
-
-            /api/files/starred
-
-            because starring is handled
-            by localStorage.
-          */
-
-          const response =
-            await fetch(
-              `${API_BASE}/api/files`,
-              {
-                method: "GET",
-                headers:
-                  getAuthHeaders(),
-                cache: "no-store",
-              }
-            );
-
-          if (!response.ok) {
-            let message =
-              "Failed to load files.";
-
-            try {
-              const data =
-                await response.json();
-
-              if (
-                data?.message
-              ) {
-                message =
-                  data.message;
-              }
-            } catch {
-              // Ignore JSON parsing error.
-            }
-
-            throw new Error(
-              message
-            );
-          }
-
-          const data =
-            await response.json();
-
-          let allFiles:
-            StarredFile[] = [];
-
-          /*
-            Supports:
-
-            [
-              ...
-            ]
-
-            OR
-
-            {
-              data: [...]
-            }
-
-            OR
-
-            {
-              files: [...]
-            }
-
-            OR
-
-            {
-              content: [...]
-            }
-          */
-
-          if (
-            Array.isArray(data)
-          ) {
-            allFiles = data;
-          } else if (
-            Array.isArray(
-              data?.data
-            )
-          ) {
-            allFiles =
-              data.data;
-          } else if (
-            Array.isArray(
-              data?.files
-            )
-          ) {
-            allFiles =
-              data.files;
-          } else if (
-            Array.isArray(
-              data?.content
-            )
-          ) {
-            allFiles =
-              data.content;
-          }
-
-          /*
-            Keep only files whose IDs
-            exist in localStorage.
-          */
-
-          const starredFiles =
-            allFiles.filter(
-              (file) =>
-                file &&
-                file.id &&
-                starredFileIds.has(
-                  file.id
-                )
-            );
-
-          setFiles(
-            starredFiles
-          );
-        } catch (err) {
-          console.error(
-            "Failed to load starred files:",
-            err
+        parentFolderId:
+          | UUID
+          | null
+      ): Promise<
+        FolderItem[]
+      > => {
+        const url =
+          new URL(
+            `${API_BASE}/api/folders`
           );
 
-          setFiles([]);
-
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load starred files."
+        if (parentFolderId) {
+          url.searchParams.set(
+            "parentFolderId",
+            parentFolderId
           );
-        } finally {
-          setLoading(false);
-          setRefreshing(false);
         }
+
+        const response =
+          await fetch(
+            url.toString(),
+            {
+              method: "GET",
+              headers:
+                authHeaders(),
+              cache: "no-store",
+            }
+          );
+
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(
+              response
+            )
+          );
+        }
+
+        const data =
+          await response.json();
+
+        return extractArray(
+          data,
+          "folders"
+        )
+          .map(
+            normalizeFolder
+          )
+          .filter(
+            (folder) =>
+              Boolean(folder.id)
+          );
       },
       []
+    );
+
+  /* =======================================================
+     FETCH FILES
+  ======================================================= */
+
+  const fetchFiles =
+    useCallback(
+      async (
+        parentFolderId:
+          | UUID
+          | null
+      ): Promise<
+        FileItem[]
+      > => {
+        const url =
+          new URL(
+            `${API_BASE}/api/files`
+          );
+
+        if (parentFolderId) {
+          url.searchParams.set(
+            "parentFolderId",
+            parentFolderId
+          );
+        }
+
+        const response =
+          await fetch(
+            url.toString(),
+            {
+              method: "GET",
+              headers:
+                authHeaders(),
+              cache: "no-store",
+            }
+          );
+
+        if (!response.ok) {
+          throw new Error(
+            await parseApiError(
+              response
+            )
+          );
+        }
+
+        const data =
+          await response.json();
+
+        return extractArray(
+          data,
+          "files"
+        )
+          .map(
+            normalizeFile
+          )
+          .filter(
+            (file) =>
+              Boolean(file.id)
+          );
+      },
+      []
+    );
+
+  /* =======================================================
+     LOAD ALL FILES + FOLDERS
+  ======================================================= */
+
+  const loadAllData =
+    useCallback(
+      async () => {
+        const token =
+          getToken();
+
+        if (!token) {
+          throw new Error(
+            "You are not authenticated. Please login again."
+          );
+        }
+
+        const allFiles: FileItem[] =
+          [];
+
+        const allFolders: FolderItem[] =
+          [];
+
+        const visitedFolders =
+          new Set<string>();
+
+        const queue: (
+          | UUID
+          | null
+        )[] = [null];
+
+        while (
+          queue.length > 0
+        ) {
+          const parentFolderId =
+            queue.shift()!;
+
+          const folderKey =
+            parentFolderId ??
+            "ROOT";
+
+          if (
+            visitedFolders.has(
+              folderKey
+            )
+          ) {
+            continue;
+          }
+
+          visitedFolders.add(
+            folderKey
+          );
+
+          const [
+            childFolders,
+            childFiles,
+          ] =
+            await Promise.all([
+              fetchFolders(
+                parentFolderId
+              ),
+              fetchFiles(
+                parentFolderId
+              ),
+            ]);
+
+          allFolders.push(
+            ...childFolders
+          );
+
+          allFiles.push(
+            ...childFiles
+          );
+
+          for (const folder of childFolders) {
+            if (
+              folder.id &&
+              !visitedFolders.has(
+                folder.id
+              )
+            ) {
+              queue.push(
+                folder.id
+              );
+            }
+          }
+        }
+
+        setFiles(allFiles);
+        setFolders(allFolders);
+      },
+      [
+        fetchFiles,
+        fetchFolders,
+      ]
     );
 
   /* =======================================================
      INITIAL LOAD
   ======================================================= */
 
+  const loadPage =
+    useCallback(
+      async (
+        showLoader = true
+      ) => {
+        try {
+          if (showLoader) {
+            setLoading(true);
+          }
+
+          setError("");
+
+          loadStarredKeys();
+
+          await loadAllData();
+        } catch (err: any) {
+          console.error(
+            "Starred page loading error:",
+            err
+          );
+
+          setError(
+            err?.message ||
+              "Unable to load starred items."
+          );
+        } finally {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      },
+      [
+        loadAllData,
+        loadStarredKeys,
+      ]
+    );
+
   useEffect(() => {
-    fetchStarredFiles();
-  }, [fetchStarredFiles]);
+    loadPage(true);
+  }, [loadPage]);
 
   /* =======================================================
-     UPDATE WHEN LOCALSTORAGE CHANGES
+     STORAGE EVENT
   ======================================================= */
 
   useEffect(() => {
-    function handleStorageChange(
-      event: StorageEvent
-    ) {
-      if (
-        event.key ===
-        STARRED_STORAGE_KEY
-      ) {
-        fetchStarredFiles();
-      }
-    }
+    const handleStorage =
+      (
+        event: StorageEvent
+      ) => {
+        if (
+          event.key ===
+          STARRED_STORAGE_KEY
+        ) {
+          loadStarredKeys();
+        }
+      };
 
     window.addEventListener(
       "storage",
-      handleStorageChange
+      handleStorage
     );
 
     return () => {
       window.removeEventListener(
         "storage",
-        handleStorageChange
+        handleStorage
       );
     };
-  }, [fetchStarredFiles]);
+  }, [loadStarredKeys]);
 
   /* =======================================================
-     CLOSE MENU WHEN CLICKING OUTSIDE
+     BUILD STARRED ITEMS
   ======================================================= */
 
-  useEffect(() => {
-    function handleClick() {
-      setActiveMenu(null);
-    }
+  const starredItems =
+    useMemo<StarredItem[]>(() => {
+      const result: StarredItem[] =
+        [];
 
-    if (activeMenu) {
-      document.addEventListener(
-        "click",
-        handleClick
-      );
-    }
+      for (const key of starredKeys) {
+        const separator =
+          key.indexOf(":");
 
-    return () => {
-      document.removeEventListener(
-        "click",
-        handleClick
-      );
-    };
-  }, [activeMenu]);
+        if (separator === -1) {
+          continue;
+        }
+
+        const type =
+          key.slice(
+            0,
+            separator
+          );
+
+        const id =
+          key.slice(
+            separator + 1
+          );
+
+        if (
+          type !== "file" &&
+          type !== "folder"
+        ) {
+          continue;
+        }
+
+        if (type === "file") {
+          const file =
+            files.find(
+              (item) =>
+                item.id === id
+            );
+
+          if (!file) {
+            continue;
+          }
+
+          result.push({
+            id: file.id,
+            type: "file",
+            name: file.fileName,
+            size: file.fileSize,
+            fileType:
+              file.fileType,
+            createdAt:
+              file.createdAt,
+            parentFolderId:
+              file.parentFolderId,
+            file,
+          });
+        }
+
+        if (type === "folder") {
+          const folder =
+            folders.find(
+              (item) =>
+                item.id === id
+            );
+
+          if (!folder) {
+            continue;
+          }
+
+          result.push({
+            id: folder.id,
+            type: "folder",
+            name: folder.name,
+            createdAt:
+              folder.createdAt,
+            parentFolderId:
+              folder.parentFolderId,
+            folder,
+          });
+        }
+      }
+
+      return result;
+    }, [
+      starredKeys,
+      files,
+      folders,
+    ]);
 
   /* =======================================================
      FILTER + SORT
   ======================================================= */
 
-  const filteredFiles =
+  const filteredItems =
     useMemo(() => {
       const query =
-        searchQuery
+        search
           .trim()
           .toLowerCase();
 
       let result =
-        files.filter((file) => {
-          if (!query) {
-            return true;
+        [...starredItems];
+
+      if (query) {
+        result =
+          result.filter(
+            (item) =>
+              item.name
+                .toLowerCase()
+                .includes(query)
+          );
+      }
+
+      result.sort(
+        (a, b) => {
+          let comparison =
+            0;
+
+          if (
+            sortKey ===
+            "name"
+          ) {
+            comparison =
+              a.name.localeCompare(
+                b.name
+              );
           }
 
-          return getFileName(file)
-            .toLowerCase()
-            .includes(query);
-        });
+          if (
+            sortKey ===
+            "size"
+          ) {
+            comparison =
+              (a.size ?? 0) -
+              (b.size ?? 0);
+          }
 
-      result.sort((a, b) => {
-        const dateA =
-          new Date(
-            a.updatedAt ||
-              a.createdAt ||
-              0
-          ).getTime();
+          if (
+            sortKey ===
+            "date"
+          ) {
+            comparison =
+              new Date(
+                a.createdAt ||
+                  0
+              ).getTime() -
+              new Date(
+                b.createdAt ||
+                  0
+              ).getTime();
+          }
 
-        const dateB =
-          new Date(
-            b.updatedAt ||
-              b.createdAt ||
-              0
-          ).getTime();
-
-        return sortDirection ===
-          "desc"
-          ? dateB - dateA
-          : dateA - dateB;
-      });
+          return sortDirection ===
+            "asc"
+            ? comparison
+            : -comparison;
+        }
+      );
 
       return result;
     }, [
-      files,
-      searchQuery,
+      starredItems,
+      search,
+      sortKey,
       sortDirection,
     ]);
 
+  const fileCount =
+    starredItems.filter(
+      (item) =>
+        item.type === "file"
+    ).length;
+
+  const folderCount =
+    starredItems.filter(
+      (item) =>
+        item.type === "folder"
+    ).length;
+
   /* =======================================================
-     UNSTAR FILE
+     UNSTAR
   ======================================================= */
 
-  function handleUnstar(
-    file: StarredFile
-  ) {
-    if (removingId) {
-      return;
-    }
+  const unstarItem =
+    useCallback(
+      (
+        item: StarredItem
+      ) => {
+        const key =
+          `${item.type}:${item.id}`;
 
-    try {
-      setRemovingId(file.id);
-      setActiveMenu(null);
+        const updated =
+          starredKeys.filter(
+            (existingKey) =>
+              existingKey !== key
+          );
 
-      /*
-        Read existing starred items.
-      */
-
-      const stored =
-        localStorage.getItem(
-          STARRED_STORAGE_KEY
-        );
-
-      let starredKeys: string[] =
-        [];
-
-      if (stored) {
         try {
-          const parsed =
-            JSON.parse(stored);
+          localStorage.setItem(
+            STARRED_STORAGE_KEY,
+            JSON.stringify(
+              updated
+            )
+          );
 
-          if (
-            Array.isArray(parsed)
-          ) {
-            starredKeys =
-              parsed.filter(
-                (
-                  item
-                ): item is string =>
-                  typeof item ===
-                  "string"
-              );
-          }
-        } catch {
-          starredKeys = [];
+          setStarredKeys(
+            updated
+          );
+
+          showToast(
+            "success",
+            `"${item.name}" removed from Starred.`
+          );
+        } catch (err) {
+          console.error(
+            "Unable to remove starred item:",
+            err
+          );
+
+          showToast(
+            "error",
+            "Unable to update Starred."
+          );
         }
-      }
+      },
+      [
+        starredKeys,
+        showToast,
+      ]
+    );
 
-      /*
-        Files page uses:
+  /* =======================================================
+     DOWNLOAD
+  ======================================================= */
 
-        file:FILE_ID
-      */
+  const downloadFile =
+    useCallback(
+      async (
+        file: FileItem
+      ) => {
+        const token =
+          getToken();
 
-      const key =
-        `file:${file.id}`;
+        if (!token) {
+          showToast(
+            "error",
+            "Please login again."
+          );
+          return;
+        }
 
-      const updatedKeys =
-        starredKeys.filter(
-          (item) =>
-            item !== key
+        setDownloadingId(
+          file.id
         );
 
-      /*
-        Save updated starred list.
-      */
+        try {
+          const response =
+            await fetch(
+              `${API_BASE}/api/files/${file.id}/download`,
+              {
+                method: "GET",
+                headers:
+                  authHeaders(),
+              }
+            );
 
-      localStorage.setItem(
-        STARRED_STORAGE_KEY,
-        JSON.stringify(
-          updatedKeys
-        )
-      );
+          if (!response.ok) {
+            throw new Error(
+              await parseApiError(
+                response
+              )
+            );
+          }
 
-      /*
-        Immediately remove it
-        from Starred page.
-      */
+          const blob =
+            await response.blob();
 
-      setFiles((current) =>
-        current.filter(
-          (item) =>
-            item.id !== file.id
-        )
-      );
-    } catch (error) {
-      console.error(
-        "Unstar error:",
-        error
-      );
+          const objectUrl =
+            window.URL.createObjectURL(
+              blob
+            );
 
-      alert(
-        "Unable to remove star."
-      );
-    } finally {
-      setRemovingId(null);
-    }
-  }
+          const anchor =
+            document.createElement(
+              "a"
+            );
 
-  /* =======================================================
-     SEARCH HANDLER
-  ======================================================= */
+          anchor.href =
+            objectUrl;
 
-  function handleSearch(
-    event: ChangeEvent<HTMLInputElement>
-  ) {
-    setSearchQuery(
-      event.target.value
+          anchor.download =
+            file.fileName;
+
+          document.body.appendChild(
+            anchor
+          );
+
+          anchor.click();
+
+          anchor.remove();
+
+          window.URL.revokeObjectURL(
+            objectUrl
+          );
+
+          showToast(
+            "success",
+            "Download started."
+          );
+        } catch (err: any) {
+          console.error(
+            "Download error:",
+            err
+          );
+
+          showToast(
+            "error",
+            err?.message ||
+              "Unable to download file."
+          );
+        } finally {
+          setDownloadingId(
+            null
+          );
+        }
+      },
+      [showToast]
     );
-  }
 
   /* =======================================================
-     CLEAR SEARCH
+     SORT
   ======================================================= */
 
-  function clearSearch() {
-    setSearchQuery("");
-  }
+  const changeSort =
+    useCallback(
+      (key: SortKey) => {
+        if (
+          sortKey === key
+        ) {
+          setSortDirection(
+            (previous) =>
+              previous ===
+              "asc"
+                ? "desc"
+                : "asc"
+          );
+
+          return;
+        }
+
+        setSortKey(key);
+
+        setSortDirection(
+          key === "name"
+            ? "asc"
+            : "desc"
+        );
+      },
+      [sortKey]
+    );
 
   /* =======================================================
      REFRESH
   ======================================================= */
 
-  function handleRefresh() {
-    fetchStarredFiles(true);
-  }
+  const handleRefresh =
+    async () => {
+      setRefreshing(true);
+
+      await loadPage(false);
+
+      showToast(
+        "success",
+        "Starred items refreshed."
+      );
+    };
 
   /* =======================================================
-     ERROR STATE
-  ======================================================= */
-
-  if (
-    !loading &&
-    error &&
-    files.length === 0
-  ) {
-    return (
-      <DashboardShell>
-        <div className="min-h-[calc(100vh-5rem)] bg-slate-50 px-4 py-6 transition-colors duration-300 dark:bg-slate-950 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-7xl">
-            <div className="mb-8">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-500/10">
-                  <Star className="h-5 w-5 fill-amber-500 text-amber-500" />
-                </div>
-
-                <div>
-                  <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-3xl">
-                    Starred
-                  </h1>
-
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    Quickly access your important files.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-red-200 bg-red-50 p-6 dark:border-red-500/20 dark:bg-red-500/5">
-              <div className="flex items-start gap-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-100 dark:bg-red-500/10">
-                  <X className="h-5 w-5 text-red-600 dark:text-red-400" />
-                </div>
-
-                <div className="flex-1">
-                  <h2 className="font-semibold text-red-800 dark:text-red-300">
-                    Unable to load starred files
-                  </h2>
-
-                  <p className="mt-1 text-sm text-red-700 dark:text-red-400">
-                    {error}
-                  </p>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      fetchStarredFiles()
-                    }
-                    className="mt-4 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    Try again
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </DashboardShell>
-    );
-  }
-
-  /* =======================================================
-     MAIN UI
+     RENDER
   ======================================================= */
 
   return (
     <DashboardShell>
-      <div
-        className="min-h-[calc(100vh-5rem)] bg-slate-50 transition-colors duration-300 dark:bg-slate-950"
-        onClick={() =>
-          setActiveMenu(null)
-        }
-      >
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="min-h-full bg-slate-50 dark:bg-slate-950">
 
-          {/* PAGE HEADER */}
+        {/* =================================================
+            HEADER
+        ================================================= */}
 
-          <div className="mb-7 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 shadow-sm dark:bg-amber-500/10">
-                <Star className="h-6 w-6 fill-amber-500 text-amber-500" />
-              </div>
+        <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+          <div className="px-5 py-6 sm:px-8">
+
+            <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
 
               <div>
-                <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-3xl">
-                  Starred
-                </h1>
+                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <Star
+                    size={16}
+                    className="fill-current text-amber-500"
+                  />
+
+                  <span>
+                    Favorites
+                  </span>
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white sm:text-3xl">
+                    Starred
+                  </h1>
+
+                  <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                    {starredItems.length}{" "}
+                    {starredItems.length ===
+                    1
+                      ? "item"
+                      : "items"}
+                  </span>
+                </div>
 
                 <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                  Your important files, all in one place.
+                  Quickly access your
+                  favorite files and
+                  folders.
                 </p>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleRefresh();
-                }}
-                disabled={refreshing}
-                title="Refresh"
-                className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
+                onClick={
+                  handleRefresh
+                }
+                disabled={
+                  refreshing ||
+                  loading
+                }
+                className="inline-flex h-10 items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 xl:self-auto"
               >
                 <RefreshCw
-                  className={`h-4 w-4 ${
+                  size={17}
+                  className={
                     refreshing
                       ? "animate-spin"
                       : ""
-                  }`}
+                  }
                 />
 
-                <span className="hidden sm:block">
-                  Refresh
-                </span>
+                Refresh
               </button>
             </div>
+
+            {/* STATS */}
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:max-w-xl">
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-amber-500 shadow-sm dark:bg-slate-800">
+                    <Star
+                      size={17}
+                      className="fill-current"
+                    />
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Starred files
+                    </p>
+
+                    <p className="text-lg font-bold text-slate-900 dark:text-white">
+                      {fileCount}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-slate-500 shadow-sm dark:bg-slate-800 dark:text-slate-300">
+                    <Folder
+                      size={18}
+                    />
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Starred folders
+                    </p>
+
+                    <p className="text-lg font-bold text-slate-900 dark:text-white">
+                      {folderCount}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
           </div>
+        </div>
 
-          {/* TOOLBAR */}
+        {/* =================================================
+            TOOLBAR
+        ================================================= */}
 
-          <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-white/10 dark:bg-white/[0.03] sm:flex-row sm:items-center">
+        <div className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+          <div className="flex flex-col gap-3 px-5 py-4 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
 
             {/* SEARCH */}
 
-            <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={handleSearch}
-                onClick={(event) =>
-                  event.stopPropagation()
-                }
-                placeholder="Search starred files..."
-                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10 dark:border-white/10 dark:bg-white/5 dark:text-white"
+            <div className="relative w-full lg:max-w-md">
+              <Search
+                size={18}
+                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
               />
 
-              {searchQuery && (
+              <input
+                value={search}
+                onChange={(event) =>
+                  setSearch(
+                    event.target.value
+                  )
+                }
+                placeholder="Search starred items..."
+                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-10 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:ring-2 focus:ring-slate-200 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:border-slate-700 dark:focus:bg-slate-900 dark:focus:ring-slate-800"
+              />
+
+              {search && (
                 <button
                   type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    clearSearch();
-                  }}
-                  className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
+                  onClick={() =>
+                    setSearch("")
+                  }
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition hover:text-slate-700 dark:hover:text-slate-200"
                 >
-                  <X className="h-4 w-4" />
+                  <X
+                    size={16}
+                  />
                 </button>
               )}
             </div>
 
-            {/* SORT */}
+            {/* CONTROLS */}
+
+            <div className="flex flex-wrap items-center gap-2">
+
+              {/* SORT */}
+
+              <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    changeSort(
+                      "name"
+                    )
+                  }
+                  className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition ${
+                    sortKey ===
+                    "name"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  }`}
+                >
+                  <ArrowDownAZ
+                    size={15}
+                  />
+
+                  Name
+
+                  {sortKey ===
+                    "name" &&
+                    (sortDirection ===
+                    "asc"
+                      ? " ↑"
+                      : " ↓")}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    changeSort(
+                      "size"
+                    )
+                  }
+                  className={`hidden h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition sm:flex ${
+                    sortKey ===
+                    "size"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  }`}
+                >
+                  Size
+
+                  {sortKey ===
+                    "size" &&
+                    (sortDirection ===
+                    "asc"
+                      ? " ↑"
+                      : " ↓")}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    changeSort(
+                      "date"
+                    )
+                  }
+                  className={`flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition ${
+                    sortKey ===
+                    "date"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  }`}
+                >
+                  <CalendarDays
+                    size={14}
+                  />
+
+                  Date
+
+                  {sortKey ===
+                    "date" &&
+                    (sortDirection ===
+                    "asc"
+                      ? " ↑"
+                      : " ↓")}
+                </button>
+
+              </div>
+
+              {/* VIEW */}
+
+              <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-800 dark:bg-slate-900">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setViewMode(
+                      "grid"
+                    )
+                  }
+                  title="Grid view"
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+                    viewMode ===
+                    "grid"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <Grid2X2
+                    size={17}
+                  />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setViewMode(
+                      "list"
+                    )
+                  }
+                  title="List view"
+                  className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+                    viewMode ===
+                    "list"
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <List
+                    size={18}
+                  />
+                </button>
+
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        {/* =================================================
+            ERROR
+        ================================================= */}
+
+        {error && (
+          <div className="px-5 pt-5 sm:px-8">
+            <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+
+              <AlertCircle
+                size={19}
+                className="mt-0.5 shrink-0"
+              />
+
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold">
+                  Unable to load starred items
+                </p>
+
+                <p className="mt-1 text-sm opacity-90">
+                  {error}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  loadPage(true)
+                }
+                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold transition hover:bg-red-100 dark:border-red-900 dark:hover:bg-red-950"
+              >
+                Retry
+              </button>
+
+            </div>
+          </div>
+        )}
+
+        {/* =================================================
+            CONTENT
+        ================================================= */}
+
+        <div className="px-5 py-6 sm:px-8">
+
+          {loading ? (
+            <LoadingState />
+          ) : filteredItems.length ===
+            0 ? (
+            <EmptyState
+              hasSearch={Boolean(
+                search.trim()
+              )}
+            />
+          ) : viewMode ===
+            "grid" ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+
+              {filteredItems.map(
+                (item) => (
+                  <StarredGridCard
+                    key={`${item.type}:${item.id}`}
+                    item={item}
+                    onUnstar={
+                      unstarItem
+                    }
+                    onDownload={
+                      item.file
+                        ? () =>
+                            downloadFile(
+                              item.file!
+                            )
+                        : undefined
+                    }
+                    downloading={
+                      downloadingId ===
+                      item.id
+                    }
+                  />
+                )
+              )}
+
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+
+              <div className="hidden grid-cols-[minmax(0,1fr)_120px_150px_110px] gap-4 border-b border-slate-200 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:border-slate-800 md:grid">
+                <span>
+                  Name
+                </span>
+
+                <span>
+                  Type
+                </span>
+
+                <span>
+                  Modified
+                </span>
+
+                <span />
+              </div>
+
+              {filteredItems.map(
+                (item) => (
+                  <StarredListItem
+                    key={`${item.type}:${item.id}`}
+                    item={item}
+                    onUnstar={
+                      unstarItem
+                    }
+                    onDownload={
+                      item.file
+                        ? () =>
+                            downloadFile(
+                              item.file!
+                            )
+                        : undefined
+                    }
+                    downloading={
+                      downloadingId ===
+                      item.id
+                    }
+                  />
+                )
+              )}
+
+            </div>
+          )}
+
+        </div>
+      </div>
+
+      {/* ===================================================
+          TOAST
+      =================================================== */}
+
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-[100] max-w-sm">
+          <div
+            className={`flex items-start gap-3 rounded-2xl border px-4 py-3 shadow-xl ${
+              toast.type ===
+              "success"
+                ? "border-emerald-200 bg-white text-slate-800 dark:border-emerald-900 dark:bg-slate-900 dark:text-white"
+                : "border-red-200 bg-white text-red-700 dark:border-red-900 dark:bg-slate-900 dark:text-red-300"
+            }`}
+          >
+            {toast.type ===
+            "success" ? (
+              <div className="mt-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                ✓
+              </div>
+            ) : (
+              <AlertCircle
+                size={19}
+                className="mt-0.5"
+              />
+            )}
+
+            <p className="text-sm font-medium">
+              {toast.message}
+            </p>
 
             <button
               type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-
-                setSortDirection(
-                  (current) =>
-                    current === "desc"
-                      ? "asc"
-                      : "desc"
-                );
-              }}
-              title="Change sort order"
-              className="flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10"
-            >
-              {sortDirection ===
-              "desc" ? (
-                <ArrowDownAZ className="h-4 w-4" />
-              ) : (
-                <ArrowUpAZ className="h-4 w-4" />
-              )}
-
-              <span className="hidden sm:block">
-                {sortDirection ===
-                "desc"
-                  ? "Newest"
-                  : "Oldest"}
-              </span>
-            </button>
-
-            {/* VIEW SWITCH */}
-
-            <div className="flex h-10 items-center rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-white/10 dark:bg-white/5">
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setViewMode("grid");
-                }}
-                title="Grid view"
-                className={`flex h-8 w-9 items-center justify-center rounded-lg transition ${
-                  viewMode === "grid"
-                    ? "bg-white text-blue-600 shadow-sm dark:bg-white/10 dark:text-blue-400"
-                    : "text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                }`}
-              >
-                <Grid2X2 className="h-4 w-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setViewMode("list");
-                }}
-                title="List view"
-                className={`flex h-8 w-9 items-center justify-center rounded-lg transition ${
-                  viewMode === "list"
-                    ? "bg-white text-blue-600 shadow-sm dark:bg-white/10 dark:text-blue-400"
-                    : "text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                }`}
-              >
-                <List className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* RESULT COUNT */}
-
-          {!loading && (
-            <div className="mb-4 flex items-center justify-between">
-              <p className="text-xs font-medium text-slate-400">
-                {searchQuery
-                  ? `${filteredFiles.length} ${
-                      filteredFiles.length ===
-                      1
-                        ? "result"
-                        : "results"
-                    }`
-                  : `${files.length} ${
-                      files.length ===
-                      1
-                        ? "starred file"
-                        : "starred files"
-                    }`}
-              </p>
-            </div>
-          )}
-
-          {/* LOADING */}
-
-          {loading ? (
-            <div
-              className={
-                viewMode === "grid"
-                  ? "grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
-                  : "space-y-3"
+              onClick={() =>
+                setToast(null)
               }
+              className="ml-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
             >
-              {Array.from({
-                length: 6,
-              }).map((_, index) => (
-                <SkeletonCard
-                  key={index}
-                />
-              ))}
-            </div>
-          ) : filteredFiles.length ===
-            0 ? (
-            /* EMPTY STATE */
+              <X
+                size={16}
+              />
+            </button>
+          </div>
+        </div>
+      )}
+    </DashboardShell>
+  );
+}
 
-            <div className="flex min-h-[420px] flex-col items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white px-6 text-center dark:border-white/10 dark:bg-white/[0.02]">
-              <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl bg-amber-100 dark:bg-amber-500/10">
-                <Star className="h-9 w-9 fill-amber-500 text-amber-500" />
-              </div>
+/* =========================================================
+   STARRED GRID CARD
+========================================================= */
 
-              {searchQuery ? (
-                <>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                    No matching files
-                  </h2>
+function StarredGridCard({
+  item,
+  onUnstar,
+  onDownload,
+  downloading,
+}: {
+  item: StarredItem;
+  onUnstar: (
+    item: StarredItem
+  ) => void;
+  onDownload?: () => void;
+  downloading: boolean;
+}) {
+  const isFolder =
+    item.type === "folder";
 
-                  <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                    We couldn't find
-                    any starred files
-                    matching{" "}
-                    <span className="font-semibold text-slate-700 dark:text-slate-200">
-                      "{searchQuery}"
-                    </span>
-                    .
-                  </p>
+  return (
+    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700">
 
-                  <button
-                    type="button"
-                    onClick={
-                      clearSearch
-                    }
-                    className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
-                  >
-                    Clear search
-                  </button>
-                </>
-              ) : (
-                <>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                    No starred files yet
-                  </h2>
+      {/* TOP */}
 
-                  <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
-                    Star your
-                    important files
-                    from My Files
-                    and they will
-                    appear here for
-                    quick access.
-                  </p>
-                </>
-              )}
-            </div>
-          ) : viewMode ===
-            "grid" ? (
-            /* GRID VIEW */
+      <div className="flex items-start justify-between gap-3 p-4">
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {filteredFiles.map(
-                (file) => {
-                  const fileName =
-                    getFileName(file);
-
-                  const fileSize =
-                    getFileSize(file);
-
-                  const isRemoving =
-                    removingId ===
-                    file.id;
-
-                  return (
-                    <div
-                      key={file.id}
-                      onClick={(event) =>
-                        event.stopPropagation()
-                      }
-                      className={`group relative overflow-visible rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md dark:border-white/10 dark:bg-white/[0.03] dark:hover:border-white/20 ${
-                        isRemoving
-                          ? "opacity-60"
-                          : ""
-                      }`}
-                    >
-                      {/* TOP */}
-
-                      <div className="mb-5 flex items-start justify-between">
-                        <div
-                          className={`flex h-12 w-12 items-center justify-center rounded-xl ${getIconClasses(
-                            file
-                          )}`}
-                        >
-                          <FileTypeIcon
-                            file={file}
-                            className="h-6 w-6"
-                          />
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 dark:bg-amber-500/10">
-                            <Star className="h-4 w-4 fill-amber-500 text-amber-500" />
-                          </div>
-
-                          <div className="relative">
-                            <button
-                              type="button"
-                              onClick={(
-                                event
-                              ) => {
-                                event.stopPropagation();
-
-                                setActiveMenu(
-                                  activeMenu ===
-                                    file.id
-                                    ? null
-                                    : file.id
-                                );
-                              }}
-                              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
-                              aria-label="File actions"
-                            >
-                              <MoreHorizontal className="h-5 w-5" />
-                            </button>
-
-                            {activeMenu ===
-                              file.id && (
-                              <div
-                                onClick={(
-                                  event
-                                ) =>
-                                  event.stopPropagation()
-                                }
-                                className="absolute right-0 top-10 z-20 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-white/10 dark:bg-slate-900"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveMenu(
-                                      null
-                                    );
-                                    downloadFile(
-                                      file
-                                    );
-                                  }}
-                                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white"
-                                >
-                                  <Download className="h-4 w-4" />
-                                  Download
-                                </button>
-
-                                <button
-                                  type="button"
-                                  disabled={
-                                    isRemoving
-                                  }
-                                  onClick={() =>
-                                    handleUnstar(
-                                      file
-                                    )
-                                  }
-                                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-amber-600 transition hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10"
-                                >
-                                  {isRemoving ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Star className="h-4 w-4 fill-current" />
-                                  )}
-
-                                  Remove star
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* NAME */}
-
-                      <div className="min-w-0">
-                        <h3
-                          title={fileName}
-                          className="truncate text-sm font-semibold text-slate-900 dark:text-white"
-                        >
-                          {fileName}
-                        </h3>
-
-                        <p className="mt-1 text-xs text-slate-400">
-                          {formatFileSize(
-                            fileSize
-                          )}
-                        </p>
-                      </div>
-
-                      {/* BOTTOM */}
-
-                      <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-white/5">
-                        <span className="text-[11px] text-slate-400">
-                          {formatDate(
-                            file.updatedAt ||
-                              file.createdAt
-                          )}
-                        </span>
-
-                        <button
-                          type="button"
-                          disabled={
-                            isRemoving
-                          }
-                          onClick={() =>
-                            handleUnstar(
-                              file
-                            )
-                          }
-                          title="Remove star"
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-amber-500 transition hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50 dark:hover:bg-amber-500/10"
-                        >
-                          {isRemoving ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Star className="h-4 w-4 fill-current" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                }
-              )}
-            </div>
+        <div
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${
+            isFolder
+              ? "bg-amber-50 text-amber-500 dark:bg-amber-500/10 dark:text-amber-400"
+              : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          }`}
+        >
+          {isFolder ? (
+            <Folder
+              size={25}
+              className="fill-current/10"
+            />
           ) : (
-            /* LIST VIEW */
-
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.03]">
-              {/* DESKTOP HEADING */}
-
-              <div className="hidden border-b border-slate-200 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 dark:border-white/10 md:grid md:grid-cols-[minmax(0,1fr)_120px_140px_100px] md:items-center md:gap-4">
-                <span>Name</span>
-                <span>Size</span>
-                <span>Modified</span>
-                <span className="text-right">
-                  Action
-                </span>
-              </div>
-
-              <div className="divide-y divide-slate-100 dark:divide-white/5">
-                {filteredFiles.map(
-                  (file) => {
-                    const fileName =
-                      getFileName(
-                        file
-                      );
-
-                    const fileSize =
-                      getFileSize(
-                        file
-                      );
-
-                    const isRemoving =
-                      removingId ===
-                      file.id;
-
-                    return (
-                      <div
-                        key={file.id}
-                        className={`group px-4 py-4 transition hover:bg-slate-50 dark:hover:bg-white/[0.02] ${
-                          isRemoving
-                            ? "opacity-60"
-                            : ""
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 md:grid md:grid-cols-[minmax(0,1fr)_120px_140px_100px] md:gap-4">
-
-                          {/* FILE */}
-
-                          <div className="flex min-w-0 items-center gap-3">
-                            <div
-                              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${getIconClasses(
-                                file
-                              )}`}
-                            >
-                              <FileTypeIcon
-                                file={file}
-                                className="h-5 w-5"
-                              />
-                            </div>
-
-                            <div className="min-w-0">
-                              <p
-                                title={
-                                  fileName
-                                }
-                                className="truncate text-sm font-semibold text-slate-800 dark:text-white"
-                              >
-                                {
-                                  fileName
-                                }
-                              </p>
-
-                              <div className="mt-1 flex items-center gap-2">
-                                <Star className="h-3 w-3 shrink-0 fill-amber-500 text-amber-500" />
-
-                                <span className="text-[11px] text-slate-400">
-                                  Starred
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* SIZE */}
-
-                          <div className="hidden text-xs text-slate-500 dark:text-slate-400 md:block">
-                            {formatFileSize(
-                              fileSize
-                            )}
-                          </div>
-
-                          {/* DATE */}
-
-                          <div className="hidden text-xs text-slate-500 dark:text-slate-400 md:block">
-                            {formatDate(
-                              file.updatedAt ||
-                                file.createdAt
-                            )}
-                          </div>
-
-                          {/* ACTIONS */}
-
-                          <div className="ml-auto flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                downloadFile(
-                                  file
-                                )
-                              }
-                              title="Download"
-                              className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/10 dark:hover:text-white"
-                            >
-                              <Download className="h-4 w-4" />
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={
-                                isRemoving
-                              }
-                              onClick={() =>
-                                handleUnstar(
-                                  file
-                                )
-                              }
-                              title="Remove star"
-                              className="flex h-9 w-9 items-center justify-center rounded-lg text-amber-500 transition hover:bg-amber-50 hover:text-amber-600 disabled:opacity-50 dark:hover:bg-amber-500/10"
-                            >
-                              {isRemoving ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Star className="h-4 w-4 fill-current" />
-                              )}
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* MOBILE DETAILS */}
-
-                        <div className="ml-[52px] mt-2 flex items-center gap-3 text-[11px] text-slate-400 md:hidden">
-                          <span>
-                            {formatFileSize(
-                              fileSize
-                            )}
-                          </span>
-
-                          <span className="h-1 w-1 rounded-full bg-slate-300 dark:bg-slate-600" />
-
-                          <span>
-                            {formatDate(
-                              file.updatedAt ||
-                                file.createdAt
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  }
-                )}
-              </div>
-            </div>
+            item.file &&
+            getFileIcon(
+              item.file,
+              25
+            )
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={() =>
+            onUnstar(item)
+          }
+          title="Remove from Starred"
+          className="rounded-lg p-2 text-amber-500 transition hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-500/10"
+        >
+          <Star
+            size={18}
+            className="fill-current"
+          />
+        </button>
+
       </div>
-    </DashboardShell>
+
+      {/* CONTENT */}
+
+      <div className="px-4 pb-4">
+
+        <p
+          className="truncate text-sm font-semibold text-slate-900 dark:text-white"
+          title={item.name}
+        >
+          {item.name}
+        </p>
+
+        <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+
+          <span className="rounded-md bg-slate-100 px-2 py-1 dark:bg-slate-800">
+            {isFolder
+              ? "Folder"
+              : getFileCategory(
+                  item.file!
+                )}
+          </span>
+
+          {!isFolder &&
+            typeof item.size ===
+              "number" && (
+              <span>
+                {formatFileSize(
+                  item.size
+                )}
+              </span>
+            )}
+
+        </div>
+
+        <div className="mt-3 flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+          <CalendarDays
+            size={13}
+          />
+
+          {formatDate(
+            item.createdAt
+          )}
+        </div>
+
+      </div>
+
+      {/* ACTIONS */}
+
+      <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50/70 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40">
+
+        {!isFolder &&
+          onDownload && (
+            <button
+              type="button"
+              onClick={
+                onDownload
+              }
+              disabled={
+                downloading
+              }
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              {downloading ? (
+                <Loader2
+                  size={15}
+                  className="animate-spin"
+                />
+              ) : (
+                <Download
+                  size={15}
+                />
+              )}
+
+              {downloading
+                ? "Downloading..."
+                : "Download"}
+            </button>
+          )}
+
+        <button
+          type="button"
+          onClick={() =>
+            onUnstar(item)
+          }
+          className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+            isFolder
+              ? "w-full"
+              : ""
+          } text-slate-500 hover:bg-red-50 hover:text-red-600 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-400`}
+        >
+          <Trash2
+            size={15}
+          />
+
+          Remove
+        </button>
+
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   STARRED LIST ITEM
+========================================================= */
+
+function StarredListItem({
+  item,
+  onUnstar,
+  onDownload,
+  downloading,
+}: {
+  item: StarredItem;
+  onUnstar: (
+    item: StarredItem
+  ) => void;
+  onDownload?: () => void;
+  downloading: boolean;
+}) {
+  const isFolder =
+    item.type === "folder";
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-4 last:border-b-0 sm:px-5 md:grid md:grid-cols-[minmax(0,1fr)_120px_150px_110px] md:items-center md:gap-4 dark:border-slate-800">
+
+      {/* NAME */}
+
+      <div className="flex min-w-0 items-center gap-3">
+
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+            isFolder
+              ? "bg-amber-50 text-amber-500 dark:bg-amber-500/10 dark:text-amber-400"
+              : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          }`}
+        >
+          {isFolder ? (
+            <Folder
+              size={21}
+            />
+          ) : (
+            item.file &&
+            getFileIcon(
+              item.file,
+              21
+            )
+          )}
+        </div>
+
+        <div className="min-w-0">
+          <p
+            className="truncate text-sm font-semibold text-slate-900 dark:text-white"
+            title={item.name}
+          >
+            {item.name}
+          </p>
+
+          <p className="mt-0.5 text-xs text-slate-400">
+            {isFolder
+              ? "Folder"
+              : formatFileSize(
+                  item.size || 0
+                )}
+          </p>
+        </div>
+
+      </div>
+
+      {/* TYPE */}
+
+      <div className="hidden text-xs font-medium capitalize text-slate-500 md:block dark:text-slate-400">
+        {isFolder
+          ? "Folder"
+          : getFileCategory(
+              item.file!
+            )}
+      </div>
+
+      {/* DATE */}
+
+      <div className="hidden items-center gap-2 text-xs text-slate-500 md:flex dark:text-slate-400">
+        <CalendarDays
+          size={14}
+        />
+
+        {formatDate(
+          item.createdAt
+        )}
+      </div>
+
+      {/* ACTIONS */}
+
+      <div className="flex items-center justify-end gap-1">
+
+        {!isFolder &&
+          onDownload && (
+            <button
+              type="button"
+              onClick={
+                onDownload
+              }
+              disabled={
+                downloading
+              }
+              title="Download"
+              className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+            >
+              {downloading ? (
+                <Loader2
+                  size={17}
+                  className="animate-spin"
+                />
+              ) : (
+                <Download
+                  size={17}
+                />
+              )}
+            </button>
+          )}
+
+        <button
+          type="button"
+          onClick={() =>
+            onUnstar(item)
+          }
+          title="Remove from Starred"
+          className="rounded-lg p-2 text-amber-500 transition hover:bg-amber-50 hover:text-red-600 dark:hover:bg-amber-500/10 dark:hover:text-red-400"
+        >
+          <Star
+            size={17}
+            className="fill-current"
+          />
+        </button>
+
+      </div>
+
+    </div>
+  );
+}
+
+/* =========================================================
+   LOADING STATE
+========================================================= */
+
+function LoadingState() {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+
+      {Array.from({
+        length: 8,
+      }).map((_, index) => (
+        <div
+          key={index}
+          className="animate-pulse rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900"
+        >
+          <div className="flex items-start justify-between">
+            <div className="h-12 w-12 rounded-xl bg-slate-200 dark:bg-slate-800" />
+
+            <div className="h-8 w-8 rounded-lg bg-slate-200 dark:bg-slate-800" />
+          </div>
+
+          <div className="mt-5 h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-800" />
+
+          <div className="mt-3 h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-800" />
+
+          <div className="mt-5 h-3 w-1/3 rounded bg-slate-200 dark:bg-slate-800" />
+
+          <div className="mt-5 h-9 rounded-lg bg-slate-200 dark:bg-slate-800" />
+        </div>
+      ))}
+
+    </div>
+  );
+}
+
+/* =========================================================
+   EMPTY STATE
+========================================================= */
+
+function EmptyState({
+  hasSearch,
+}: {
+  hasSearch: boolean;
+}) {
+  return (
+    <div className="flex min-h-[430px] items-center justify-center">
+
+      <div className="max-w-md text-center">
+
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-500 dark:bg-amber-500/10 dark:text-amber-400">
+          <Star
+            size={29}
+            className="fill-current"
+          />
+        </div>
+
+        <h2 className="mt-5 text-lg font-bold text-slate-900 dark:text-white">
+          {hasSearch
+            ? "No starred items found"
+            : "No starred items yet"}
+        </h2>
+
+        <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+          {hasSearch
+            ? "Try a different search term."
+            : "Star your important files and folders from My Files to access them quickly from here."}
+        </p>
+
+        {!hasSearch && (
+          <div className="mt-5 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+            <Star
+              size={14}
+              className="fill-current text-amber-500"
+            />
+
+            Click the star icon on
+            any file or folder
+          </div>
+        )}
+
+      </div>
+
+    </div>
   );
 }
