@@ -51,76 +51,76 @@ public class SharedFile {
         return id;
     }
 
-    public void setId(UUID id) {
-        this.id = id;
-    }
-
     public UUID getFileId() {
         return fileId;
-    }
-
-    public void setFileId(UUID fileId) {
-        this.fileId = fileId;
     }
 
     public String getName() {
         return name;
     }
 
-    public void setName(String name) {
-        this.name = name;
-    }
-
     public String getType() {
         return type;
-    }
-
-    public void setType(String type) {
-        this.type = type;
     }
 
     public Long getSize() {
         return size;
     }
 
-    public void setSize(Long size) {
-        this.size = size;
-    }
-
     public String getOwner() {
         return owner;
-    }
-
-    public void setOwner(String owner) {
-        this.owner = owner;
     }
 
     public String getOwnerEmail() {
         return ownerEmail;
     }
 
-    public void setOwnerEmail(String ownerEmail) {
-        this.ownerEmail = ownerEmail;
-    }
-
     public String getPermission() {
         return permission;
-    }
-
-    public void setPermission(String permission) {
-        this.permission = permission;
     }
 
     public LocalDateTime getSharedDate() {
         return sharedDate;
     }
 
-    public void setSharedDate(LocalDateTime sharedDate) {
-        this.sharedDate = sharedDate;
-    }
-
     public String getStatus() {
         return status;
+    }
+
+    public void setId(UUID id) {
+        this.id = id;
+    }
+
+    public void setFileId(UUID fileId) {
+        this.fileId = fileId;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    public void setSize(Long size) {
+        this.size = size;
+    }
+
+    public void setOwner(String owner) {
+        this.owner = owner;
+    }
+
+    public void setOwnerEmail(String ownerEmail) {
+        this.ownerEmail = ownerEmail;
+    }
+
+    public void setPermission(String permission) {
+        this.permission = permission;
+    }
+
+    public void setSharedDate(LocalDateTime sharedDate) {
+        this.sharedDate = sharedDate;
     }
 
     public void setStatus(String status) {
