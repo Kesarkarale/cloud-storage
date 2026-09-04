@@ -11,7 +11,11 @@ import java.util.UUID;
         uniqueConstraints = {
                 @UniqueConstraint(
                         name = "uk_folder_user_parent_name",
-                        columnNames = {"user_id", "parent_folder_id", "name"}
+                        columnNames = {
+                                "user_id",
+                                "parent_folder_id",
+                                "name"
+                        }
                 )
         }
 )
@@ -33,18 +37,38 @@ public class Folder {
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
+    // =========================
+    // TRASH
+    // =========================
+
+    @Column(nullable = false)
+    private boolean deleted = false;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    // =========================
+    // STARRED / FAVOURITE
+    // =========================
+
+    @Column(nullable = false)
+    private boolean starred = false;
+
     public Folder() {
     }
-        @Column(nullable = false)
-private boolean deleted = false;
 
-@Column(name = "deleted_at")
-private LocalDateTime deletedAt;
+    // =========================
+    // CREATED DATE
+    // =========================
 
     @PrePersist
     public void onCreate() {
         createdAt = LocalDateTime.now();
     }
+
+    // =========================
+    // ID
+    // =========================
 
     public UUID getId() {
         return id;
@@ -54,6 +78,10 @@ private LocalDateTime deletedAt;
         this.id = id;
     }
 
+    // =========================
+    // NAME
+    // =========================
+
     public String getName() {
         return name;
     }
@@ -61,6 +89,10 @@ private LocalDateTime deletedAt;
     public void setName(String name) {
         this.name = name;
     }
+
+    // =========================
+    // USER ID
+    // =========================
 
     public UUID getUserId() {
         return userId;
@@ -70,6 +102,10 @@ private LocalDateTime deletedAt;
         this.userId = userId;
     }
 
+    // =========================
+    // PARENT FOLDER
+    // =========================
+
     public UUID getParentFolderId() {
         return parentFolderId;
     }
@@ -78,22 +114,47 @@ private LocalDateTime deletedAt;
         this.parentFolderId = parentFolderId;
     }
 
+    // =========================
+    // CREATED AT
+    // =========================
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
-        public boolean isDeleted() {
-    return deleted;
-}
 
-public void setDeleted(boolean deleted) {
-    this.deleted = deleted;
-}
+    // =========================
+    // DELETED
+    // =========================
 
-public LocalDateTime getDeletedAt() {
-    return deletedAt;
-}
+    public boolean isDeleted() {
+        return deleted;
+    }
 
-public void setDeletedAt(LocalDateTime deletedAt) {
-    this.deletedAt = deletedAt;
-}
+    public void setDeleted(boolean deleted) {
+        this.deleted = deleted;
+    }
+
+    // =========================
+    // DELETED AT
+    // =========================
+
+    public LocalDateTime getDeletedAt() {
+        return deletedAt;
+    }
+
+    public void setDeletedAt(LocalDateTime deletedAt) {
+        this.deletedAt = deletedAt;
+    }
+
+    // =========================
+    // STARRED
+    // =========================
+
+    public boolean isStarred() {
+        return starred;
+    }
+
+    public void setStarred(boolean starred) {
+        this.starred = starred;
+    }
 }
