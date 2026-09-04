@@ -148,6 +148,9 @@ public class FileService {
             file.setDeleted(false);
             file.setDeletedAt(null);
 
+            // New files are not starred by default
+            file.setStarred(false);
+
             return fileRepository.save(file);
 
         } catch (IOException e) {
@@ -248,7 +251,6 @@ public class FileService {
             );
         }
 
-        // IMPORTANT:
         // Physical file is NOT deleted here.
         // Only marked as deleted.
 
@@ -382,5 +384,102 @@ public class FileService {
         fileRepository.deleteAll(
                 trashFiles
         );
+    }
+
+    // =========================================================
+    // STARRED / FAVOURITE
+    // =========================================================
+
+    /**
+     * Get all starred active files for the current user.
+     */
+    public List<File> getStarredFiles(
+            UUID userId
+    ) {
+
+        return fileRepository
+                .findByUserIdAndStarredTrueAndDeletedFalse(
+                        userId
+                );
+    }
+
+    /**
+     * Star a file.
+     */
+    public File starFile(
+            UUID fileId,
+            UUID userId
+    ) {
+
+        File file =
+                fileRepository
+                        .findByIdAndUserIdAndDeletedFalse(
+                                fileId,
+                                userId
+                        )
+                        .orElseThrow(() ->
+                                new RuntimeException(
+                                        "File not found"
+                                )
+                        );
+
+        file.setStarred(true);
+
+        return fileRepository.save(file);
+    }
+
+    /**
+     * Remove star from a file.
+     */
+    public File unstarFile(
+            UUID fileId,
+            UUID userId
+    ) {
+
+        File file =
+                fileRepository
+                        .findByIdAndUserIdAndDeletedFalse(
+                                fileId,
+                                userId
+                        )
+                        .orElseThrow(() ->
+                                new RuntimeException(
+                                        "File not found"
+                                )
+                        );
+
+        file.setStarred(false);
+
+        return fileRepository.save(file);
+    }
+
+    /**
+     * Toggle favourite status.
+     *
+     * If currently starred -> unstar.
+     * If currently unstarred -> star.
+     */
+    public File toggleStar(
+            UUID fileId,
+            UUID userId
+    ) {
+
+        File file =
+                fileRepository
+                        .findByIdAndUserIdAndDeletedFalse(
+                                fileId,
+                                userId
+                        )
+                        .orElseThrow(() ->
+                                new RuntimeException(
+                                        "File not found"
+                                )
+                        );
+
+        file.setStarred(
+                !file.isStarred()
+        );
+
+        return fileRepository.save(file);
     }
 }
