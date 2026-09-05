@@ -23,7 +23,6 @@ import {
   MoreHorizontal,
   RefreshCw,
   Search,
-  Share2,
   Star,
   Trash2,
   Upload,
@@ -595,9 +594,6 @@ export default function FilesPage() {
 
   const [folderName, setFolderName] =
     useState("");
-
-  const [shareFile, setShareFile] =
-    useState<FileItem | null>(null);
 
   /* -------------------------------------------------------
      TOAST
@@ -1454,61 +1450,6 @@ export default function FilesPage() {
       setDownloadingId(
         null
       );
-    }
-  };
-
-  /* =======================================================
-     SHARE FILE
-  ======================================================= */
-
-  const shareFileWithUser = async (
-    file: FileItem,
-    email: string,
-    permission: "VIEWER" | "EDITOR"
-  ) => {
-    const cleanEmail = email.trim();
-
-    if (!cleanEmail) {
-      showToast("error", "Please enter an email address.");
-      return false;
-    }
-
-    const token = getToken();
-
-    if (!token) {
-      showToast("error", "Please login again.");
-      return false;
-    }
-
-    try {
-      const params = new URLSearchParams({
-        fileId: file.id,
-        email: cleanEmail,
-        permission,
-      });
-
-      const response = await fetch(
-        `${API_BASE}/api/shares?${params.toString()}`,
-        {
-          method: "POST",
-          headers: authHeaders(),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(await parseApiError(response));
-      }
-
-      setShareFile(null);
-      showToast("success", `"${file.fileName}" shared successfully.`);
-      return true;
-    } catch (err: any) {
-      console.error("Share file error:", err);
-      showToast(
-        "error",
-        err?.message || "Unable to share file."
-      );
-      return false;
     }
   };
 
@@ -2378,9 +2319,6 @@ export default function FilesPage() {
                             onDelete={
                               requestDeleteFile
                             }
-                            onShare={() =>
-                              setShareFile(file)
-                            }
                             downloading={
                               downloadingId ===
                               file.id
@@ -2425,9 +2363,6 @@ export default function FilesPage() {
                             }
                             onDelete={
                               requestDeleteFile
-                            }
-                            onShare={() =>
-                              setShareFile(file)
                             }
                             downloading={
                               downloadingId ===
@@ -2751,14 +2686,6 @@ export default function FilesPage() {
         </Modal>
       )}
 
-      {shareFile && (
-        <ShareFileModal
-          file={shareFile}
-          onClose={() => setShareFile(null)}
-          onShare={shareFileWithUser}
-        />
-      )}
-
       {/* ===================================================
           DETAILS MODAL
       =================================================== */}
@@ -2781,9 +2708,6 @@ export default function FilesPage() {
           }
           onDelete={
             requestDeleteFile
-          }
-          onShare={() =>
-            setShareFile(selectedFile)
           }
           downloading={
             downloadingId ===
@@ -3495,7 +3419,6 @@ function FileCard({
   onPreview,
   onDownload,
   onDelete,
-  onShare,
   downloading,
   deleting,
   onToggleStar,
@@ -3514,7 +3437,6 @@ function FileCard({
     file: FileItem,
     event?: MouseEvent
   ) => void;
-  onShare: () => void;
   downloading: boolean;
   deleting: boolean;
   onToggleStar: (
@@ -3603,19 +3525,6 @@ function FileCard({
                 );
               }}
             />
-
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onShare();
-              }}
-              className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-600 dark:text-slate-400 dark:hover:bg-blue-950/30 dark:hover:text-blue-400"
-              title="Share"
-              aria-label={`Share ${file.fileName}`}
-            >
-              <Share2 size={17} />
-            </button>
 
             <span className="rounded-md bg-slate-100 px-1.5 py-1 text-[10px] font-bold uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
               {category}
@@ -3711,7 +3620,6 @@ function FileListItem({
   onPreview,
   onDownload,
   onDelete,
-  onShare,
   downloading,
   deleting,
   onToggleStar,
@@ -3730,7 +3638,6 @@ function FileListItem({
     file: FileItem,
     event?: MouseEvent
   ) => void;
-  onShare: () => void;
   downloading: boolean;
   deleting: boolean;
   onToggleStar: (
@@ -3810,19 +3717,6 @@ function FileListItem({
         />
 
         <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onShare();
-          }}
-          className="rounded-lg p-2 text-slate-500 hover:bg-blue-50 hover:text-blue-600 dark:text-slate-400 dark:hover:bg-blue-950/30 dark:hover:text-blue-400"
-          title="Share"
-          aria-label={`Share ${file.fileName}`}
-        >
-          <Share2 size={17} />
-        </button>
-
-        <button
           disabled={
             downloading
           }
@@ -3881,128 +3775,6 @@ function FileListItem({
 }
 
 /* =========================================================
-   SHARE FILE MODAL
-========================================================= */
-
-function ShareFileModal({
-  file,
-  onClose,
-  onShare,
-}: {
-  file: FileItem;
-  onClose: () => void;
-  onShare: (
-    file: FileItem,
-    email: string,
-    permission: "VIEWER" | "EDITOR"
-  ) => Promise<boolean>;
-}) {
-  const [email, setEmail] = useState("");
-  const [permission, setPermission] =
-    useState<"VIEWER" | "EDITOR">("VIEWER");
-  const [sharing, setSharing] = useState(false);
-
-  const submit = async () => {
-    if (!email.trim() || sharing) return;
-
-    setSharing(true);
-    try {
-      await onShare(file, email, permission);
-    } finally {
-      setSharing(false);
-    }
-  };
-
-  return (
-    <Modal title="Share file" onClose={onClose}>
-      <div className="space-y-5">
-        <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-4 dark:bg-slate-900">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-blue-600 shadow-sm dark:bg-slate-800 dark:text-blue-400">
-            <Share2 size={20} />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-              {file.fileName}
-            </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Share this file with another user
-            </p>
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300">
-            Email address
-          </label>
-          <input
-            autoFocus
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
-            placeholder="Enter user's email"
-            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-200 dark:border-slate-800 dark:bg-slate-950 dark:text-white dark:focus:border-slate-700 dark:focus:ring-slate-800"
-          />
-        </div>
-
-        <div>
-          <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-            Permission
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {(["VIEWER", "EDITOR"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setPermission(value)}
-                className={`rounded-xl border px-4 py-3 text-left transition ${
-                  permission === value
-                    ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-500/10 dark:text-blue-400"
-                    : "border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
-                }`}
-              >
-                <p className="text-sm font-semibold">
-                  {value === "VIEWER" ? "Viewer" : "Editor"}
-                </p>
-                <p className="mt-1 text-xs opacity-75">
-                  {value === "VIEWER" ? "Can view and download" : "Can edit the shared file"}
-                </p>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          The recipient must already have an account.
-        </p>
-
-        <div className="flex justify-end gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
-          <button
-            type="button"
-            disabled={sharing}
-            onClick={onClose}
-            className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={sharing || !email.trim()}
-            onClick={submit}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
-          >
-            {sharing && <Loader2 size={17} className="animate-spin" />}
-            {sharing ? "Sharing..." : "Share file"}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-/* =========================================================
    FILE DETAILS MODAL
 ========================================================= */
 
@@ -4012,7 +3784,6 @@ function FileDetailsModal({
   onPreview,
   onDownload,
   onDelete,
-  onShare,
   downloading,
   deleting,
 }: {
@@ -4030,7 +3801,6 @@ function FileDetailsModal({
     file: FileItem,
     event?: MouseEvent
   ) => void;
-  onShare: () => void;
   downloading: boolean;
   deleting: boolean;
 }) {
@@ -4113,15 +3883,6 @@ function FileDetailsModal({
               Preview
             </button>
           )}
-
-          <button
-            type="button"
-            onClick={onShare}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
-          >
-            <Share2 size={17} />
-            Share
-          </button>
 
           <button
             disabled={
