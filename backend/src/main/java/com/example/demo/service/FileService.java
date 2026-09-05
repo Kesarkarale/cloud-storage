@@ -9,7 +9,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -20,10 +23,18 @@ public class FileService {
     private final FileRepository fileRepository;
     private final FolderRepository folderRepository;
 
+    // =========================================================
+    // UPLOAD DIRECTORY
+    // =========================================================
+
     private final Path uploadDirectory =
             Paths.get("uploads")
                     .toAbsolutePath()
                     .normalize();
+
+    // =========================================================
+    // CONSTRUCTOR
+    // =========================================================
 
     public FileService(
             FileRepository fileRepository,
@@ -34,24 +45,32 @@ public class FileService {
         this.folderRepository = folderRepository;
 
         try {
+
             Files.createDirectories(uploadDirectory);
+
         } catch (IOException e) {
+
             throw new RuntimeException(
-                    "Could not create upload directory",
+                    "Could not create upload directory: "
+                            + e.getMessage(),
                     e
             );
         }
     }
 
-    // =========================
+    // =========================================================
     // UPLOAD FILE
-    // =========================
+    // =========================================================
 
     public File uploadFile(
             MultipartFile multipartFile,
             UUID userId,
             UUID parentFolderId
     ) {
+
+        // -----------------------------------------------------
+        // Validate file
+        // -----------------------------------------------------
 
         if (multipartFile == null ||
                 multipartFile.isEmpty()) {
@@ -61,59 +80,126 @@ public class FileService {
             );
         }
 
+        // -----------------------------------------------------
+        // Validate user
+        // -----------------------------------------------------
+
+        if (userId == null) {
+
+            throw new RuntimeException(
+                    "User ID is missing"
+            );
+        }
+
+        // -----------------------------------------------------
+        // Validate parent folder
+        // -----------------------------------------------------
+
         if (parentFolderId != null) {
 
             Folder folder =
-                    folderRepository.findById(
-                            parentFolderId
-                    ).orElseThrow(() ->
-                            new RuntimeException(
-                                    "Folder not found"
-                            )
-                    );
+                    folderRepository
+                            .findById(parentFolderId)
+                            .orElseThrow(() ->
+                                    new RuntimeException(
+                                            "Folder not found"
+                                    )
+                            );
 
-            if (!folder.getUserId().equals(userId)) {
+            if (folder.getUserId() == null ||
+                    !folder.getUserId().equals(userId)) {
 
                 throw new RuntimeException(
-                        "You are not allowed to upload here"
+                        "You are not allowed to upload to this folder"
                 );
             }
         }
 
+        // -----------------------------------------------------
+        // Get original filename
+        // -----------------------------------------------------
+
+        String originalFileName =
+                multipartFile.getOriginalFilename();
+
+        if (originalFileName == null ||
+                originalFileName.isBlank()) {
+
+            throw new RuntimeException(
+                    "Invalid file name"
+            );
+        }
+
+        // -----------------------------------------------------
+        // Make filename safe
+        // -----------------------------------------------------
+
+        String safeFileName;
+
         try {
 
-            String originalFileName =
-                    multipartFile.getOriginalFilename();
-
-            if (originalFileName == null ||
-                    originalFileName.isBlank()) {
-
-                throw new RuntimeException(
-                        "Invalid file name"
-                );
-            }
-
-            String safeOriginalName =
+            safeFileName =
                     Paths.get(originalFileName)
                             .getFileName()
                             .toString();
 
-            String storedFileName =
-                    UUID.randomUUID()
-                            + "_"
-                            + safeOriginalName;
+        } catch (Exception e) {
 
-            Path targetPath =
-                    uploadDirectory.resolve(
-                            storedFileName
-                    ).normalize();
+            throw new RuntimeException(
+                    "Invalid file name",
+                    e
+            );
+        }
 
-            if (!targetPath.startsWith(uploadDirectory)) {
+        if (safeFileName.isBlank()) {
 
-                throw new RuntimeException(
-                        "Invalid file path"
-                );
-            }
+            throw new RuntimeException(
+                    "Invalid file name"
+            );
+        }
+
+        // -----------------------------------------------------
+        // Generate unique stored filename
+        // -----------------------------------------------------
+
+        String storedFileName =
+                UUID.randomUUID()
+                        + "_"
+                        + safeFileName;
+
+        // -----------------------------------------------------
+        // Create target path
+        // -----------------------------------------------------
+
+        Path targetPath =
+                uploadDirectory
+                        .resolve(storedFileName)
+                        .normalize();
+
+        // -----------------------------------------------------
+        // Security check
+        // -----------------------------------------------------
+
+        if (!targetPath.startsWith(uploadDirectory)) {
+
+            throw new RuntimeException(
+                    "Invalid file path"
+            );
+        }
+
+        try {
+
+            // -------------------------------------------------
+            // Make sure upload directory exists
+            // -------------------------------------------------
+
+            Files.createDirectories(
+                    uploadDirectory
+            );
+
+            // -------------------------------------------------
+            // Save physical file
+            // -------------------------------------------------
 
             Files.copy(
                     multipartFile.getInputStream(),
@@ -121,47 +207,104 @@ public class FileService {
                     StandardCopyOption.REPLACE_EXISTING
             );
 
+            // -------------------------------------------------
+            // Create database entity
+            // -------------------------------------------------
+
             File file = new File();
 
-            file.setFileName(safeOriginalName);
-
-            file.setFileType(
-                    multipartFile.getContentType() != null
-                            ? multipartFile.getContentType()
-                            : "application/octet-stream"
+            file.setFileName(
+                    safeFileName
             );
+
+            // -------------------------------------------------
+            // File type
+            // -------------------------------------------------
+
+            String contentType =
+                    multipartFile.getContentType();
+
+            if (contentType != null &&
+                    !contentType.isBlank()) {
+
+                file.setFileType(
+                        contentType
+                );
+
+            } else {
+
+                file.setFileType(
+                        "application/octet-stream"
+                );
+            }
+
+            // -------------------------------------------------
+            // File size
+            // -------------------------------------------------
 
             file.setFileSize(
                     multipartFile.getSize()
             );
 
+            // -------------------------------------------------
+            // Physical file path
+            // -------------------------------------------------
+
             file.setFilePath(
-                    targetPath.toString()
+                    targetPath
+                            .toAbsolutePath()
+                            .toString()
             );
 
-            file.setUserId(userId);
+            // -------------------------------------------------
+            // Owner
+            // -------------------------------------------------
+
+            file.setUserId(
+                    userId
+            );
+
+            // -------------------------------------------------
+            // Parent folder
+            // -------------------------------------------------
 
             file.setParentFolderId(
                     parentFolderId
             );
 
-            file.setDeleted(false);
-            file.setDeletedAt(null);
+            // -------------------------------------------------
+            // Trash status
+            // -------------------------------------------------
 
-            return fileRepository.save(file);
+            file.setDeleted(
+                    false
+            );
+
+            file.setDeletedAt(
+                    null
+            );
+
+            // -------------------------------------------------
+            // Save database record
+            // -------------------------------------------------
+
+            return fileRepository.save(
+                    file
+            );
 
         } catch (IOException e) {
 
             throw new RuntimeException(
-                    "File upload failed",
+                    "Could not save uploaded file: "
+                            + e.getMessage(),
                     e
             );
         }
     }
 
-    // =========================
+    // =========================================================
     // GET ACTIVE FILES
-    // =========================
+    // =========================================================
 
     public List<File> getFiles(
             UUID userId,
@@ -183,9 +326,9 @@ public class FileService {
                 );
     }
 
-    // =========================
+    // =========================================================
     // GET FILE
-    // =========================
+    // =========================================================
 
     public File getFile(
             UUID fileId,
@@ -193,7 +336,8 @@ public class FileService {
     ) {
 
         File file =
-                fileRepository.findById(fileId)
+                fileRepository
+                        .findById(fileId)
                         .orElseThrow(() ->
                                 new RuntimeException(
                                         "File not found"
@@ -217,9 +361,9 @@ public class FileService {
         return file;
     }
 
-    // =========================
+    // =========================================================
     // MOVE FILE TO TRASH
-    // =========================
+    // =========================================================
 
     public void deleteFile(
             UUID fileId,
@@ -227,7 +371,8 @@ public class FileService {
     ) {
 
         File file =
-                fileRepository.findById(fileId)
+                fileRepository
+                        .findById(fileId)
                         .orElseThrow(() ->
                                 new RuntimeException(
                                         "File not found"
@@ -248,21 +393,25 @@ public class FileService {
             );
         }
 
-        // IMPORTANT:
-        // Physical file is NOT deleted here.
-        // Only marked as deleted.
+        // Physical file is NOT deleted.
+        // Only mark it as deleted.
 
-        file.setDeleted(true);
+        file.setDeleted(
+                true
+        );
+
         file.setDeletedAt(
                 LocalDateTime.now()
         );
 
-        fileRepository.save(file);
+        fileRepository.save(
+                file
+        );
     }
 
-    // =========================
-    // GET TRASH
-    // =========================
+    // =========================================================
+    // GET TRASH FILES
+    // =========================================================
 
     public List<File> getTrashFiles(
             UUID userId
@@ -274,9 +423,9 @@ public class FileService {
                 );
     }
 
-    // =========================
+    // =========================================================
     // RESTORE FILE
-    // =========================
+    // =========================================================
 
     public void restoreFile(
             UUID fileId,
@@ -296,15 +445,23 @@ public class FileService {
                         );
 
         // Restore file
-        file.setDeleted(false);
-        file.setDeletedAt(null);
 
-        fileRepository.save(file);
+        file.setDeleted(
+                false
+        );
+
+        file.setDeletedAt(
+                null
+        );
+
+        fileRepository.save(
+                file
+        );
     }
 
-    // =========================
+    // =========================================================
     // PERMANENT DELETE
-    // =========================
+    // =========================================================
 
     public void permanentlyDeleteFile(
             UUID fileId,
@@ -325,28 +482,37 @@ public class FileService {
 
         try {
 
+            // -------------------------------------------------
             // Delete physical file
+            // -------------------------------------------------
+
             Files.deleteIfExists(
                     Paths.get(
                             file.getFilePath()
                     )
             );
 
+            // -------------------------------------------------
             // Delete database record
-            fileRepository.delete(file);
+            // -------------------------------------------------
+
+            fileRepository.delete(
+                    file
+            );
 
         } catch (IOException e) {
 
             throw new RuntimeException(
-                    "Permanent file deletion failed",
+                    "Permanent file deletion failed: "
+                            + e.getMessage(),
                     e
             );
         }
     }
 
-    // =========================
+    // =========================================================
     // EMPTY TRASH
-    // =========================
+    // =========================================================
 
     public void emptyTrash(
             UUID userId
@@ -361,6 +527,10 @@ public class FileService {
         for (File file : trashFiles) {
 
             try {
+
+                // ---------------------------------------------
+                // Delete physical file
+                // ---------------------------------------------
 
                 Files.deleteIfExists(
                         Paths.get(
@@ -378,7 +548,10 @@ public class FileService {
             }
         }
 
-        // Delete all DB records
+        // -----------------------------------------------------
+        // Delete all database records
+        // -----------------------------------------------------
+
         fileRepository.deleteAll(
                 trashFiles
         );
