@@ -1106,10 +1106,12 @@ export default function FilesPage() {
                   "application/json",
               },
               body: JSON.stringify({
-                name: cleanName,
-                parentFolderId:
-                  currentFolderId,
-              }),
+  name: cleanName,
+  parentFolderId:
+    currentFolderId && currentFolderId.trim()
+      ? currentFolderId
+      : null,
+}),
             }
           );
 
@@ -4047,16 +4049,6 @@ function FileListItem({
             );
           }}
         />
-
-        <button
-          onClick={(event) =>
-            onShare(file, event)
-          }
-          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-          title="Share"
-        >
-          <Share2 size={17} />
-        </button>
 
         <button
           disabled={
