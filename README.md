@@ -131,7 +131,66 @@ CloudVault
     │
     └── pom.xml
 ```
+
+## 🔑 Authentication Flow
+
+User
+ │
+ ▼
+Login / Register
+ │
+ ▼
+Spring Boot Authentication
+ │
+ ▼
+JWT Token
+ │
+ ▼
+Frontend Local Storage
+ │
+ ▼
+Protected API Requests
+ │
+ ▼
+Spring Security
+ │
+ ▼
+Authenticated User
+
  ---
+
+## 📸 Screenshots
+
+* **Dashboard**
+  
+  ![Dashboard](dashboard.png)
+  
+  * **My File**
+  
+  ![My File](file.png)
+  
+  * **Starred File**
+  
+  ![Starred](star.png)
+
+  * **Shared File**
+  
+  ![Shared File](share.png)
+  
+  * **Recent**
+  
+  ![Recent](recent.png)
+  
+  * **Trash Bin**
+  
+  ![Trash Bin](trash.png)
+
+ * **Setting**
+  
+  ![Setting](setting.png)
+
+
+---
 
 ##  👨‍💻 Developed By
 
