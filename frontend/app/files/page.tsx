@@ -1106,10 +1106,12 @@ export default function FilesPage() {
                   "application/json",
               },
               body: JSON.stringify({
-                name: cleanName,
-                parentFolderId:
-                  currentFolderId,
-              }),
+  name: cleanName,
+  parentFolderId:
+    currentFolderId && currentFolderId.trim()
+      ? currentFolderId
+      : null,
+}),
             }
           );
 
