@@ -4,6 +4,7 @@ import com.example.demo.model.Folder;
 import com.example.demo.model.User;
 import com.example.demo.service.FolderService;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -21,14 +22,25 @@ public class FolderController {
         this.folderService = folderService;
     }
 
-    // =========================
+    // =========================================================
     // CREATE FOLDER REQUEST
-    // =========================
+    // =========================================================
 
     public static class CreateFolderRequest {
 
         private String name;
-        private UUID parentFolderId;
+
+        /*
+         * String ठेवला आहे जेणेकरून:
+         *
+         * ""
+         * null
+         * "null"
+         * valid UUID
+         *
+         * सगळे safely handle करता येतील.
+         */
+        private String parentFolderId;
 
         public String getName() {
             return name;
@@ -38,173 +50,369 @@ public class FolderController {
             this.name = name;
         }
 
-        public UUID getParentFolderId() {
+        public String getParentFolderId() {
             return parentFolderId;
         }
 
-        public void setParentFolderId(UUID parentFolderId) {
+        public void setParentFolderId(String parentFolderId) {
             this.parentFolderId = parentFolderId;
         }
     }
 
-    // =========================
-    // GET CURRENT USER ID
-    // =========================
+    // =========================================================
+    // CURRENT USER
+    // =========================================================
 
     private UUID getCurrentUserId(Authentication authentication) {
 
-        if (authentication == null ||
-                authentication.getPrincipal() == null) {
-
-            throw new RuntimeException(
-                    "User is not authenticated"
-            );
+        if (authentication == null) {
+            throw new RuntimeException("User is not authenticated");
         }
 
         Object principal = authentication.getPrincipal();
 
         if (!(principal instanceof User)) {
-
-            throw new RuntimeException(
-                    "Invalid authenticated user"
-            );
+            throw new RuntimeException("Invalid authenticated user");
         }
 
         User user = (User) principal;
 
+        if (user.getId() == null) {
+            throw new RuntimeException("Authenticated user ID is missing");
+        }
+
         return user.getId();
     }
 
-    // =========================
+    // =========================================================
     // CREATE FOLDER
-    // =========================
+    // =========================================================
 
     @PostMapping
-    public ResponseEntity<Folder> createFolder(
+    public ResponseEntity<?> createFolder(
             @RequestBody CreateFolderRequest request,
             Authentication authentication
     ) {
 
-        UUID userId = getCurrentUserId(authentication);
+        try {
 
-        if (request == null ||
-                request.getName() == null ||
-                request.getName().trim().isEmpty()) {
+            UUID userId = getCurrentUserId(authentication);
 
-            throw new RuntimeException(
-                    "Folder name cannot be empty"
-            );
+            // -------------------------
+            // Validate request
+            // -------------------------
+
+            if (request == null) {
+                return ResponseEntity
+                        .badRequest()
+                        .body(new ErrorResponse(
+                                "Invalid request body."
+                        ));
+            }
+
+            String name = request.getName();
+
+            if (name == null || name.trim().isEmpty()) {
+                return ResponseEntity
+                        .badRequest()
+                        .body(new ErrorResponse(
+                                "Folder name cannot be empty."
+                        ));
+            }
+
+            String cleanName = name.trim();
+
+            if (cleanName.length() > 255) {
+                return ResponseEntity
+                        .badRequest()
+                        .body(new ErrorResponse(
+                                "Folder name cannot exceed 255 characters."
+                        ));
+            }
+
+            // -------------------------
+            // Parse parent folder ID
+            // -------------------------
+
+            UUID parentFolderId = null;
+
+            String parentValue = request.getParentFolderId();
+
+            if (
+                    parentValue != null
+                            && !parentValue.trim().isEmpty()
+                            && !parentValue.equalsIgnoreCase("null")
+            ) {
+
+                try {
+
+                    parentFolderId =
+                            UUID.fromString(parentValue.trim());
+
+                } catch (IllegalArgumentException exception) {
+
+                    return ResponseEntity
+                            .badRequest()
+                            .body(new ErrorResponse(
+                                    "Invalid parent folder ID."
+                            ));
+                }
+            }
+
+            // -------------------------
+            // Create folder
+            // -------------------------
+
+            Folder folder =
+                    folderService.createFolder(
+                            cleanName,
+                            parentFolderId,
+                            userId
+                    );
+
+            return ResponseEntity
+                    .status(HttpStatus.CREATED)
+                    .body(folder);
+
+        } catch (RuntimeException exception) {
+
+            return ResponseEntity
+                    .badRequest()
+                    .body(new ErrorResponse(
+                            exception.getMessage()
+                    ));
         }
-
-        Folder folder = folderService.createFolder(
-                request.getName(),
-                request.getParentFolderId(),
-                userId
-        );
-
-        return ResponseEntity.ok(folder);
     }
 
-    // =========================
+    // =========================================================
     // GET FOLDERS
-    // =========================
+    // =========================================================
 
     @GetMapping
-    public ResponseEntity<List<Folder>> getFolders(
-            @RequestParam(required = false) UUID parentFolderId,
+    public ResponseEntity<?> getFolders(
+            @RequestParam(required = false) String parentFolderId,
             Authentication authentication
     ) {
 
-        UUID userId = getCurrentUserId(authentication);
+        try {
 
-        List<Folder> folders =
-                folderService.getFolders(
-                        userId,
-                        parentFolderId
-                );
+            UUID userId =
+                    getCurrentUserId(authentication);
 
-        return ResponseEntity.ok(folders);
+            UUID parsedParentId = null;
+
+            if (
+                    parentFolderId != null
+                            && !parentFolderId.trim().isEmpty()
+                            && !parentFolderId.equalsIgnoreCase("null")
+            ) {
+
+                try {
+
+                    parsedParentId =
+                            UUID.fromString(
+                                    parentFolderId.trim()
+                            );
+
+                } catch (IllegalArgumentException exception) {
+
+                    return ResponseEntity
+                            .badRequest()
+                            .body(new ErrorResponse(
+                                    "Invalid parent folder ID."
+                            ));
+                }
+            }
+
+            List<Folder> folders =
+                    folderService.getFolders(
+                            userId,
+                            parsedParentId
+                    );
+
+            return ResponseEntity.ok(folders);
+
+        } catch (RuntimeException exception) {
+
+            return ResponseEntity
+                    .badRequest()
+                    .body(new ErrorResponse(
+                            exception.getMessage()
+                    ));
+        }
     }
 
-    // =========================
-    // MOVE FOLDER TO TRASH
-    // =========================
+    // =========================================================
+    // DELETE FOLDER
+    // =========================================================
 
     @DeleteMapping("/{folderId}")
-    public ResponseEntity<String> deleteFolder(
+    public ResponseEntity<?> deleteFolder(
             @PathVariable UUID folderId,
             Authentication authentication
     ) {
 
-        UUID userId = getCurrentUserId(authentication);
+        try {
 
-        folderService.deleteFolder(
-                folderId,
-                userId
-        );
+            UUID userId =
+                    getCurrentUserId(authentication);
 
-        return ResponseEntity.ok(
-                "Folder moved to trash successfully"
-        );
+            folderService.deleteFolder(
+                    folderId,
+                    userId
+            );
+
+            return ResponseEntity.ok(
+                    new MessageResponse(
+                            "Folder moved to trash successfully."
+                    )
+            );
+
+        } catch (RuntimeException exception) {
+
+            return ResponseEntity
+                    .badRequest()
+                    .body(new ErrorResponse(
+                            exception.getMessage()
+                    ));
+        }
     }
 
-    // =========================
-    // GET TRASH FOLDERS
-    // =========================
+    // =========================================================
+    // TRASH
+    // =========================================================
 
     @GetMapping("/trash")
-    public ResponseEntity<List<Folder>> getTrashFolders(
+    public ResponseEntity<?> getTrashFolders(
             Authentication authentication
     ) {
 
-        UUID userId = getCurrentUserId(authentication);
+        try {
 
-        return ResponseEntity.ok(
-                folderService.getTrashFolders(userId)
-        );
+            UUID userId =
+                    getCurrentUserId(authentication);
+
+            return ResponseEntity.ok(
+                    folderService.getTrashFolders(userId)
+            );
+
+        } catch (RuntimeException exception) {
+
+            return ResponseEntity
+                    .badRequest()
+                    .body(new ErrorResponse(
+                            exception.getMessage()
+                    ));
+        }
     }
 
-    // =========================
-    // RESTORE FOLDER
-    // =========================
+    // =========================================================
+    // RESTORE
+    // =========================================================
 
     @PostMapping("/{folderId}/restore")
-    public ResponseEntity<String> restoreFolder(
+    public ResponseEntity<?> restoreFolder(
             @PathVariable UUID folderId,
             Authentication authentication
     ) {
 
-        UUID userId = getCurrentUserId(authentication);
+        try {
 
-        folderService.restoreFolder(
-                folderId,
-                userId
-        );
+            UUID userId =
+                    getCurrentUserId(authentication);
 
-        return ResponseEntity.ok(
-                "Folder restored successfully"
-        );
+            folderService.restoreFolder(
+                    folderId,
+                    userId
+            );
+
+            return ResponseEntity.ok(
+                    new MessageResponse(
+                            "Folder restored successfully."
+                    )
+            );
+
+        } catch (RuntimeException exception) {
+
+            return ResponseEntity
+                    .badRequest()
+                    .body(new ErrorResponse(
+                            exception.getMessage()
+                    ));
+        }
     }
 
-    // =========================
-    // PERMANENT DELETE FOLDER
-    // =========================
+    // =========================================================
+    // PERMANENT DELETE
+    // =========================================================
 
     @DeleteMapping("/{folderId}/permanent")
-    public ResponseEntity<String> permanentlyDeleteFolder(
+    public ResponseEntity<?> permanentlyDeleteFolder(
             @PathVariable UUID folderId,
             Authentication authentication
     ) {
 
-        UUID userId = getCurrentUserId(authentication);
+        try {
 
-        folderService.permanentlyDeleteFolder(
-                folderId,
-                userId
-        );
+            UUID userId =
+                    getCurrentUserId(authentication);
 
-        return ResponseEntity.ok(
-                "Folder permanently deleted"
-        );
+            folderService.permanentlyDeleteFolder(
+                    folderId,
+                    userId
+            );
+
+            return ResponseEntity.ok(
+                    new MessageResponse(
+                            "Folder permanently deleted."
+                    )
+            );
+
+        } catch (RuntimeException exception) {
+
+            return ResponseEntity
+                    .badRequest()
+                    .body(new ErrorResponse(
+                            exception.getMessage()
+                    ));
+        }
+    }
+
+    // =========================================================
+    // RESPONSE CLASSES
+    // =========================================================
+
+    public static class ErrorResponse {
+
+        private String message;
+
+        public ErrorResponse(String message) {
+            this.message = message;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public void setMessage(String message) {
+            this.message = message;
+        }
+    }
+
+    public static class MessageResponse {
+
+        private String message;
+
+        public MessageResponse(String message) {
+            this.message = message;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public void setMessage(String message) {
+            this.message = message;
+        }
     }
 }
