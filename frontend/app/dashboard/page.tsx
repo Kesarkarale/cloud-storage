@@ -18,9 +18,9 @@ import {
   Users,
 } from "lucide-react";
 
-import DashboardShell from "@/components/DashboardShell";
-import StorageCard from "@/components/StorageCard";
-import FileCard from "@/components/FileCard";
+import DashboardShell from "@/app/components/DashboardShell";
+import StorageCard from "@/app/components/StorageCard";
+import FileCard from "@/app/components/FileCard";
 
 type FileItem = {
   name: string;
