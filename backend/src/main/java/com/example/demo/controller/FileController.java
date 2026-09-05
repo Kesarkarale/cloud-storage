@@ -44,36 +44,36 @@ public class FileController {
     // =========================================================
 
     private UUID getCurrentUserId(
-            Authentication authentication
-    ) {
+        Authentication authentication
+) {
 
-        if (authentication == null ||
-                !authentication.isAuthenticated()) {
+    if (authentication == null ||
+            !authentication.isAuthenticated()) {
 
+        throw new RuntimeException(
+                "User is not authenticated"
+        );
+    }
+
+    Object principal =
+            authentication.getPrincipal();
+
+    // Our JwtAuthenticationFilter stores User
+    if (principal instanceof User user) {
+
+        if (user.getId() == null) {
             throw new RuntimeException(
-                    "User is not authenticated"
+                    "Authenticated user ID is missing"
             );
         }
 
-        Object principal =
-                authentication.getPrincipal();
+        return user.getId();
+    }
 
-        // -----------------------------------------------------
-        // Case 1: Principal is our User entity
-        // -----------------------------------------------------
-
-        if (principal instanceof User) {
-
-            User user = (User) principal;
-
-            if (user.getId() == null) {
-                throw new RuntimeException(
-                        "Authenticated user ID is missing"
-                );
-            }
-
-            return user.getId();
-        }
+    throw new RuntimeException(
+            "Invalid authenticated user"
+    );
+}
 
         // -----------------------------------------------------
         // Case 2: Principal is Spring UserDetails
@@ -171,38 +171,27 @@ public class FileController {
     // =========================================================
 
     @PostMapping(
-            value = "/upload",
-            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
-    )
-    public ResponseEntity<File> uploadFile(
+        value = "/upload",
+        consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+)
+public ResponseEntity<File> uploadFile(
+        @RequestParam("file") MultipartFile file,
+        @RequestParam(required = false) UUID parentFolderId,
+        Authentication authentication
+) {
 
-            @RequestParam("file")
-            MultipartFile file,
+    UUID userId =
+            getCurrentUserId(authentication);
 
-            @RequestParam(
-                    value = "parentFolderId",
-                    required = false
-            )
-            UUID parentFolderId,
+    File uploadedFile =
+            fileService.uploadFile(
+                    file,
+                    userId,
+                    parentFolderId
+            );
 
-            Authentication authentication
-    ) {
-
-        UUID userId =
-                getCurrentUserId(authentication);
-
-        File uploadedFile =
-                fileService.uploadFile(
-                        file,
-                        userId,
-                        parentFolderId
-                );
-
-        return ResponseEntity.ok(
-                uploadedFile
-        );
-    }
-
+    return ResponseEntity.ok(uploadedFile);
+}
     // =========================================================
     // GET ACTIVE FILES
     // =========================================================
