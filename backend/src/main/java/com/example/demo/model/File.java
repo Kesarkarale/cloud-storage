@@ -34,26 +34,33 @@ public class File {
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
-    @Column(nullable = false, columnDefinition = "boolean default false")
+    @Column(nullable = false)
     private boolean deleted = false;
 
     @Column
     private LocalDateTime deletedAt;
 
-    @Column(nullable = false, columnDefinition = "boolean default false")
-private boolean starred = false;
-    
+    @Column(nullable = false)
+    private boolean starred = false;
+
     public File() {
     }
 
     @PrePersist
-    public void onCreate() {
-        createdAt = LocalDateTime.now();
+    protected void onCreate() {
+
+        if (createdAt == null) {
+            createdAt = LocalDateTime.now();
+        }
 
         if (!deleted) {
             deletedAt = null;
         }
     }
+
+    // =====================================================
+    // ID
+    // =====================================================
 
     public UUID getId() {
         return id;
@@ -63,6 +70,10 @@ private boolean starred = false;
         this.id = id;
     }
 
+    // =====================================================
+    // FILE NAME
+    // =====================================================
+
     public String getFileName() {
         return fileName;
     }
@@ -70,6 +81,10 @@ private boolean starred = false;
     public void setFileName(String fileName) {
         this.fileName = fileName;
     }
+
+    // =====================================================
+    // FILE TYPE
+    // =====================================================
 
     public String getFileType() {
         return fileType;
@@ -79,6 +94,10 @@ private boolean starred = false;
         this.fileType = fileType;
     }
 
+    // =====================================================
+    // FILE SIZE
+    // =====================================================
+
     public Long getFileSize() {
         return fileSize;
     }
@@ -86,6 +105,10 @@ private boolean starred = false;
     public void setFileSize(Long fileSize) {
         this.fileSize = fileSize;
     }
+
+    // =====================================================
+    // FILE PATH
+    // =====================================================
 
     public String getFilePath() {
         return filePath;
@@ -95,6 +118,10 @@ private boolean starred = false;
         this.filePath = filePath;
     }
 
+    // =====================================================
+    // USER ID
+    // =====================================================
+
     public UUID getUserId() {
         return userId;
     }
@@ -102,6 +129,10 @@ private boolean starred = false;
     public void setUserId(UUID userId) {
         this.userId = userId;
     }
+
+    // =====================================================
+    // PARENT FOLDER ID
+    // =====================================================
 
     public UUID getParentFolderId() {
         return parentFolderId;
@@ -111,9 +142,21 @@ private boolean starred = false;
         this.parentFolderId = parentFolderId;
     }
 
+    // =====================================================
+    // CREATED AT
+    // =====================================================
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }
+
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    // =====================================================
+    // DELETED
+    // =====================================================
 
     public boolean isDeleted() {
         return deleted;
@@ -123,6 +166,10 @@ private boolean starred = false;
         this.deleted = deleted;
     }
 
+    // =====================================================
+    // DELETED AT
+    // =====================================================
+
     public LocalDateTime getDeletedAt() {
         return deletedAt;
     }
@@ -131,11 +178,15 @@ private boolean starred = false;
         this.deletedAt = deletedAt;
     }
 
-    public boolean isStarred() {
-    return starred;
-}
+    // =====================================================
+    // STARRED
+    // =====================================================
 
-public void setStarred(boolean starred) {
-    this.starred = starred;
-}
+    public boolean isStarred() {
+        return starred;
+    }
+
+    public void setStarred(boolean starred) {
+        this.starred = starred;
+    }
 }
