@@ -288,9 +288,26 @@ public class FileService {
             // Save database record
             // -------------------------------------------------
 
-            return fileRepository.save(
-                    file
-            );
+            try {
+
+    File savedFile = fileRepository.save(file);
+
+    return savedFile;
+
+} catch (Exception e) {
+
+    // DB save failed, so remove the already uploaded physical file
+    try {
+        Files.deleteIfExists(targetPath);
+    } catch (IOException deleteException) {
+        e.addSuppressed(deleteException);
+    }
+
+    throw new RuntimeException(
+            "Could not save file record: " + e.getMessage(),
+            e
+    );
+}
 
         } catch (IOException e) {
 
