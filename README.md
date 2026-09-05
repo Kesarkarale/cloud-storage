@@ -202,50 +202,50 @@ Demo Video:
 
 ## 🌟 Main User Flow
 
-Register
-   ↓
-Login
-   ↓
-Dashboard
-   ↓
-Upload File
-   ↓
-Create Folder
-   ↓
-Manage Files
-   ↓
-Download / Delete
-   ↓
-Recent / Starred / Shared
-   ↓
-Settings
+Register                                                                                
+   ↓                                                                                                                     
+Login                                                                                            
+   ↓                                                                                      
+Dashboard                                                                                        
+   ↓                                                                                       
+Upload File                                                                                  
+   ↓                                                                                                  
+Create Folder                                                                                                  
+   ↓                                                                                                  
+Manage Files                                                                                             
+   ↓                                                                                                 
+Download / Delete                                                                                              
+   ↓                                                                                                     
+Recent / Starred / Shared                                                                                          
+   ↓                                                                                                  
+Settings                                                              
 
 ## 📱 Responsive Design
 
 CloudVault is designed to work across:
 
-💻 Desktop
-💻 Laptop
-📱 Mobile
-📟 Tablet
+💻 Desktop                                                                               
+💻 Laptop                                                               
+📱 Mobile                                                                    
+📟 Tablet                                                                           
 
 The dashboard automatically adapts to different screen sizes.
 
 ## 🔮 Future Improvements
 
-File sharing with users
-Email-based file sharing
-Cloud storage usage calculated from real files
-Persistent notification system
-Password change functionality
-Account deletion
-File preview
-Image gallery
-Video preview
-Search optimization
-Storage quota management
-Admin dashboard
-Cloud deployment
+File sharing with users                                                 
+Email-based file sharing                                                  
+Cloud storage usage calculated from real files                                              
+Persistent notification system                                                  
+Password change functionality                                                  
+Account deletion                                                                
+File preview                                                       
+Image gallery                                                       
+Video preview                                                                       
+Search optimization                                                                           
+Storage quota management                                                                    
+Admin dashboard                                                        
+Cloud deployment                                                 
 
 **GitHub:**
 https://github.com/Kesarkarale/cloud-vault
