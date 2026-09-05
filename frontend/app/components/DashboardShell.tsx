@@ -790,9 +790,9 @@ export default function DashboardShell({
                 className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.08]"
               >
                 {theme === "dark" ? (
-                  <Sun className="h-4 w-4 text-amber-500" />
+                  <Moon className="h-4 w-4 text-amber-400" />
                 ) : (
-                  <Moon className="h-4 w-4 text-blue-600" />
+                  <Sun className="h-4 w-4 text-blue-500" />
                 )}
               </button>
 
