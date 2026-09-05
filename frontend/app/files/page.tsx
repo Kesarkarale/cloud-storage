@@ -1105,7 +1105,8 @@ export default function FilesPage() {
                 "Content-Type":
                   "application/json",
               },
-              body: JSON.stringify({
+              
+                body: JSON.stringify({
   name: cleanName,
   parentFolderId:
     currentFolderId && currentFolderId.trim()
@@ -4033,16 +4034,6 @@ function FileListItem({
       </div>
 
       <div className="flex items-center gap-1 md:justify-end">
-      
-      <button
-  onClick={(event) =>
-    onShare(file, event)
-  }
-  className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-  title="Share"
->
-  <Share2 size={17} />
-</button>
 
         <StarButton
           isStarred={
