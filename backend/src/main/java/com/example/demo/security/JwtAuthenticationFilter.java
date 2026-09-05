@@ -2,10 +2,12 @@ package com.example.demo.security;
 
 import com.example.demo.model.User;
 import com.example.demo.repository.UserRepository;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -38,46 +40,82 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String authHeader = request.getHeader("Authorization");
 
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        // No JWT token
+        if (authHeader == null ||
+                !authHeader.startsWith("Bearer ")) {
+
             filterChain.doFilter(request, response);
             return;
         }
 
-        String token = authHeader.substring(7);
+        String token = authHeader.substring(7).trim();
+
+        if (token.isEmpty()) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         try {
 
-            if (jwtService.isTokenValid(token)) {
+            // Validate JWT
+            if (!jwtService.isTokenValid(token)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
 
-                String email = jwtService.extractEmail(token);
+            // Get email from JWT
+            String email = jwtService.extractEmail(token);
 
-                User user = userRepository
-                        .findByEmail(email)
-                        .orElse(null);
+            if (email == null || email.isBlank()) {
+                filterChain.doFilter(request, response);
+                return;
+            }
 
-                if (user != null) {
+            // Find user
+            User user = userRepository
+                    .findByEmail(email)
+                    .orElse(null);
 
-                    String role = user.getRole().name();
+            if (user == null) {
+                filterChain.doFilter(request, response);
+                return;
+            }
 
-                    UsernamePasswordAuthenticationToken authentication =
-                            new UsernamePasswordAuthenticationToken(
-                                    user,
-                                    null,
-                                    List.of(
-                                            new SimpleGrantedAuthority(
-                                                    "ROLE_" + role
-                                            )
-                                    )
-                            );
+            // Prevent replacing existing authentication
+            if (SecurityContextHolder
+                    .getContext()
+                    .getAuthentication() == null) {
 
-                    SecurityContextHolder
-                            .getContext()
-                            .setAuthentication(authentication);
-                }
+                String role = user.getRole() != null
+                        ? user.getRole().name()
+                        : "USER";
+
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(
+                                user,
+                                null,
+                                List.of(
+                                        new SimpleGrantedAuthority(
+                                                "ROLE_" + role
+                                        )
+                                )
+                        );
+
+                SecurityContextHolder
+                        .getContext()
+                        .setAuthentication(authentication);
             }
 
         } catch (Exception e) {
-            // Invalid token - request continues without authentication
+
+            // Invalid/expired JWT
+            SecurityContextHolder
+                    .clearContext();
+
+            System.out.println(
+                    "JWT authentication failed: "
+                            + e.getMessage()
+            );
         }
 
         filterChain.doFilter(request, response);
