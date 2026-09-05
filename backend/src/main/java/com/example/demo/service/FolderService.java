@@ -3,12 +3,19 @@ package com.example.demo.service;
 import com.example.demo.model.Folder;
 import com.example.demo.repository.FileRepository;
 import com.example.demo.repository.FolderRepository;
-import org.springframework.stereotype.Service;
 
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 
 @Service
+@Transactional
 public class FolderService {
 
     private final FolderRepository folderRepository;
@@ -22,38 +29,80 @@ public class FolderService {
         this.fileRepository = fileRepository;
     }
 
+    // =========================================================
+    // CREATE FOLDER
+    // =========================================================
+
     public Folder createFolder(
             String name,
             UUID parentFolderId,
             UUID userId
     ) {
 
+        if (userId == null) {
+            throw new RuntimeException(
+                    "User is not authenticated."
+            );
+        }
+
         if (name == null || name.trim().isEmpty()) {
-            throw new RuntimeException("Folder name cannot be empty");
+            throw new RuntimeException(
+                    "Folder name cannot be empty."
+            );
         }
 
         String cleanName = name.trim();
 
+        if (cleanName.length() > 255) {
+            throw new RuntimeException(
+                    "Folder name cannot exceed 255 characters."
+            );
+        }
+
+        // =====================================================
+        // CHECK PARENT FOLDER
+        // =====================================================
+
         if (parentFolderId != null) {
-            Folder parent = folderRepository.findById(parentFolderId)
-                    .orElseThrow(() ->
-                            new RuntimeException("Parent folder not found")
-                    );
+
+            Folder parent =
+                    folderRepository
+                            .findById(parentFolderId)
+                            .orElseThrow(() ->
+                                    new RuntimeException(
+                                            "Parent folder not found."
+                                    )
+                            );
 
             if (!parent.getUserId().equals(userId)) {
                 throw new RuntimeException(
-                        "You are not allowed to use this folder"
+                        "You are not allowed to use this folder."
+                );
+            }
+
+            if (parent.isDeleted()) {
+                throw new RuntimeException(
+                        "Cannot create a folder inside a deleted folder."
                 );
             }
         }
 
+        // =====================================================
+        // CHECK DUPLICATE
+        // =====================================================
+
         List<Folder> existingFolders;
 
         if (parentFolderId == null) {
+
             existingFolders =
                     folderRepository
-                            .findByUserIdAndParentFolderIdIsNull(userId);
+                            .findByUserIdAndParentFolderIdIsNull(
+                                    userId
+                            );
+
         } else {
+
             existingFolders =
                     folderRepository
                             .findByUserIdAndParentFolderId(
@@ -63,45 +112,80 @@ public class FolderService {
         }
 
         boolean alreadyExists =
-                existingFolders.stream()
+                existingFolders
+                        .stream()
                         .anyMatch(folder ->
-                                folder.getName()
+                                !folder.isDeleted()
+                                        && folder.getName() != null
+                                        && folder.getName()
                                         .equalsIgnoreCase(cleanName)
                         );
 
         if (alreadyExists) {
+
             throw new RuntimeException(
-                    "A folder with this name already exists"
+                    "A folder with this name already exists."
             );
         }
+
+        // =====================================================
+        // CREATE
+        // =====================================================
 
         Folder folder = new Folder();
 
         folder.setName(cleanName);
         folder.setUserId(userId);
         folder.setParentFolderId(parentFolderId);
+        folder.setDeleted(false);
+        folder.setDeletedAt(null);
 
         return folderRepository.save(folder);
     }
 
+    // =========================================================
+    // GET FOLDERS
+    // =========================================================
+
+    @Transactional(readOnly = true)
     public List<Folder> getFolders(
             UUID userId,
             UUID parentFolderId
     ) {
 
-        if (parentFolderId == null) {
-            return folderRepository
-                    .findByUserIdAndParentFolderIdIsNull(userId);
+        if (userId == null) {
+            throw new RuntimeException(
+                    "User is not authenticated."
+            );
         }
 
-        Folder parent = folderRepository.findById(parentFolderId)
-                .orElseThrow(() ->
-                        new RuntimeException("Folder not found")
-                );
+        if (parentFolderId == null) {
+
+            return folderRepository
+                    .findByUserIdAndParentFolderIdIsNull(userId)
+                    .stream()
+                    .filter(folder -> !folder.isDeleted())
+                    .toList();
+        }
+
+        Folder parent =
+                folderRepository
+                        .findById(parentFolderId)
+                        .orElseThrow(() ->
+                                new RuntimeException(
+                                        "Folder not found."
+                                )
+                        );
 
         if (!parent.getUserId().equals(userId)) {
             throw new RuntimeException(
-                    "You are not allowed to access this folder"
+                    "You are not allowed to access this folder."
+            );
+        }
+
+        if (parent.isDeleted()) {
+            throw new RuntimeException(
+                    "This folder is in trash."
             );
         }
 
@@ -109,8 +193,15 @@ public class FolderService {
                 .findByUserIdAndParentFolderId(
                         userId,
                         parentFolderId
-                );
+                )
+                .stream()
+                .filter(folder -> !folder.isDeleted())
+                .toList();
     }
+
+    // =========================================================
+    // SOFT DELETE FOLDER
+    // =========================================================
 
     public void deleteFolder(
             UUID folderId,
@@ -118,25 +209,31 @@ public class FolderService {
     ) {
 
         Folder folder =
-                folderRepository.findById(folderId)
+                folderRepository
+                        .findById(folderId)
                         .orElseThrow(() ->
                                 new RuntimeException(
-                                        "Folder not found"
+                                        "Folder not found."
                                 )
                         );
 
         if (!folder.getUserId().equals(userId)) {
             throw new RuntimeException(
-                    "You are not allowed to delete this folder"
+                    "You are not allowed to delete this folder."
             );
         }
 
-        deleteFolderRecursively(folderId, userId);
-    }
+        if (folder.isDeleted()) {
+            throw new RuntimeException(
+                    "Folder is already in trash."
+            );
+        }
 
-    // =========================
-    // SOFT DELETE FOLDER
-    // =========================
+        deleteFolderRecursively(
+                folderId,
+                userId
+        );
+    }
 
     private void deleteFolderRecursively(
             UUID folderId,
@@ -152,11 +249,18 @@ public class FolderService {
 
         for (Folder child : children) {
 
-            deleteFolderRecursively(
-                    child.getId(),
-                    userId
-            );
+            if (!child.isDeleted()) {
+
+                deleteFolderRecursively(
+                        child.getId(),
+                        userId
+                );
+            }
         }
+
+        // =====================================================
+        // DELETE FILES INSIDE FOLDER
+        // =====================================================
 
         List<com.example.demo.model.File> files =
                 fileRepository
@@ -165,44 +269,55 @@ public class FolderService {
                                 folderId
                         );
 
-        for (com.example.demo.model.File file : files) {
+        LocalDateTime now =
+                LocalDateTime.now();
+
+        for (
+                com.example.demo.model.File file
+                : files
+        ) {
 
             file.setDeleted(true);
-            file.setDeletedAt(
-                    java.time.LocalDateTime.now()
-            );
+            file.setDeletedAt(now);
 
             fileRepository.save(file);
         }
 
+        // =====================================================
+        // DELETE FOLDER
+        // =====================================================
+
         Folder folder =
-                folderRepository.findById(folderId)
+                folderRepository
+                        .findById(folderId)
                         .orElseThrow(() ->
                                 new RuntimeException(
-                                        "Folder not found"
+                                        "Folder not found."
                                 )
                         );
 
         folder.setDeleted(true);
-        folder.setDeletedAt(
-                java.time.LocalDateTime.now()
-        );
+        folder.setDeletedAt(now);
 
         folderRepository.save(folder);
     }
 
-    // =========================
-    // GET TRASH FOLDERS
-    // =========================
+    // =========================================================
+    // GET TRASH
+    // =========================================================
 
-    public List<Folder> getTrashFolders(UUID userId) {
+    @Transactional(readOnly = true)
+    public List<Folder> getTrashFolders(
+            UUID userId
+    ) {
 
-        return folderRepository.findByUserIdAndDeletedTrue(userId);
+        return folderRepository
+                .findByUserIdAndDeletedTrue(userId);
     }
 
-    // =========================
-    // RESTORE FOLDER
-    // =========================
+    // =========================================================
+    // RESTORE
+    // =========================================================
 
     public void restoreFolder(
             UUID folderId,
@@ -217,7 +332,7 @@ public class FolderService {
                         )
                         .orElseThrow(() ->
                                 new RuntimeException(
-                                        "Trashed folder not found"
+                                        "Trashed folder not found."
                                 )
                         );
 
@@ -227,9 +342,9 @@ public class FolderService {
         folderRepository.save(folder);
     }
 
-    // =========================
-    // PERMANENT DELETE FOLDER
-    // =========================
+    // =========================================================
+    // PERMANENT DELETE
+    // =========================================================
 
     public void permanentlyDeleteFolder(
             UUID folderId,
@@ -244,11 +359,19 @@ public class FolderService {
                         )
                         .orElseThrow(() ->
                                 new RuntimeException(
-                                        "Trashed folder not found"
+                                        "Trashed folder not found."
                                 )
                         );
 
-        // Delete all files inside folder
+        permanentlyDeleteChildren(
+                folderId,
+                userId
+        );
+
+        // =====================================================
+        // DELETE FILES
+        // =====================================================
+
         List<com.example.demo.model.File> files =
                 fileRepository
                         .findByUserIdAndParentFolderId(
@@ -256,23 +379,87 @@ public class FolderService {
                                 folderId
                         );
 
-        for (com.example.demo.model.File file : files) {
+        for (
+                com.example.demo.model.File file
+                : files
+        ) {
 
             try {
 
-                java.nio.file.Files.deleteIfExists(
-                        java.nio.file.Paths.get(
-                                file.getFilePath()
-                        )
-                );
+                if (file.getFilePath() != null) {
+
+                    Path path =
+                            Paths.get(
+                                    file.getFilePath()
+                            );
+
+                    Files.deleteIfExists(path);
+                }
 
             } catch (Exception ignored) {
+                // Database deletion continues even if
+                // physical file is already missing.
             }
 
             fileRepository.delete(file);
         }
 
-        // Delete folder from database
+        // =====================================================
+        // DELETE FOLDER
+        // =====================================================
+
         folderRepository.delete(folder);
+    }
+
+    private void permanentlyDeleteChildren(
+            UUID folderId,
+            UUID userId
+    ) {
+
+        List<Folder> children =
+                folderRepository
+                        .findByUserIdAndParentFolderId(
+                                userId,
+                                folderId
+                        );
+
+        for (Folder child : children) {
+
+            permanentlyDeleteChildren(
+                    child.getId(),
+                    userId
+            );
+
+            List<com.example.demo.model.File> files =
+                    fileRepository
+                            .findByUserIdAndParentFolderId(
+                                    userId,
+                                    child.getId()
+                            );
+
+            for (
+                    com.example.demo.model.File file
+                    : files
+            ) {
+
+                try {
+
+                    if (file.getFilePath() != null) {
+
+                        Files.deleteIfExists(
+                                Paths.get(
+                                        file.getFilePath()
+                                )
+                        );
+                    }
+
+                } catch (Exception ignored) {
+                }
+
+                fileRepository.delete(file);
+            }
+
+            folderRepository.delete(child);
+        }
     }
 }
