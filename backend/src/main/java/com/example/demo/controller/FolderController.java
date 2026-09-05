@@ -22,12 +22,36 @@ public class FolderController {
     }
 
     // =========================
+    // CREATE FOLDER REQUEST
+    // =========================
+
+    public static class CreateFolderRequest {
+
+        private String name;
+        private UUID parentFolderId;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public UUID getParentFolderId() {
+            return parentFolderId;
+        }
+
+        public void setParentFolderId(UUID parentFolderId) {
+            this.parentFolderId = parentFolderId;
+        }
+    }
+
+    // =========================
     // GET CURRENT USER ID
     // =========================
 
-    private UUID getCurrentUserId(
-            Authentication authentication
-    ) {
+    private UUID getCurrentUserId(Authentication authentication) {
 
         if (authentication == null ||
                 authentication.getPrincipal() == null) {
@@ -37,8 +61,7 @@ public class FolderController {
             );
         }
 
-        Object principal =
-                authentication.getPrincipal();
+        Object principal = authentication.getPrincipal();
 
         if (!(principal instanceof User)) {
 
@@ -58,21 +81,26 @@ public class FolderController {
 
     @PostMapping
     public ResponseEntity<Folder> createFolder(
-            @RequestParam String name,
-            @RequestParam(required = false)
-            UUID parentFolderId,
+            @RequestBody CreateFolderRequest request,
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
-        Folder folder =
-                folderService.createFolder(
-                        name,
-                        parentFolderId,
-                        userId
-                );
+        if (request == null ||
+                request.getName() == null ||
+                request.getName().trim().isEmpty()) {
+
+            throw new RuntimeException(
+                    "Folder name cannot be empty"
+            );
+        }
+
+        Folder folder = folderService.createFolder(
+                request.getName(),
+                request.getParentFolderId(),
+                userId
+        );
 
         return ResponseEntity.ok(folder);
     }
@@ -83,13 +111,11 @@ public class FolderController {
 
     @GetMapping
     public ResponseEntity<List<Folder>> getFolders(
-            @RequestParam(required = false)
-            UUID parentFolderId,
+            @RequestParam(required = false) UUID parentFolderId,
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
         List<Folder> folders =
                 folderService.getFolders(
@@ -110,8 +136,7 @@ public class FolderController {
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
         folderService.deleteFolder(
                 folderId,
@@ -132,8 +157,7 @@ public class FolderController {
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
         return ResponseEntity.ok(
                 folderService.getTrashFolders(userId)
@@ -150,8 +174,7 @@ public class FolderController {
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
         folderService.restoreFolder(
                 folderId,
@@ -173,8 +196,7 @@ public class FolderController {
             Authentication authentication
     ) {
 
-        UUID userId =
-                getCurrentUserId(authentication);
+        UUID userId = getCurrentUserId(authentication);
 
         folderService.permanentlyDeleteFolder(
                 folderId,
